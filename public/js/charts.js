@@ -1,6 +1,7 @@
 // ECharts option builders that follow one visual system (thin marks, hairline grid,
 // fixed categorical order, single-hue sequential ramp) and read colors from CSS tokens.
 import { esc, int, compact, duration } from './format.js';
+import { artNode } from './art.js';
 
 /* global echarts */
 
@@ -343,7 +344,7 @@ export function calendarChart({ years, data, max }) {
 
 /**
  * Render a data table into a container.
- * columns: [{ key, label, num?, fmt?(value,row), sortValue?(row) }]
+ * columns: [{ key, label, num?, fmt?(value,row), sortValue?(row), sub?, art?(row), artRound? }]
  */
 export function renderTable(container, { columns, rows, onRowClick, sortKey, limit = 500, caption }) {
   let key = sortKey ?? null;
@@ -393,7 +394,22 @@ export function renderTable(container, { columns, rows, onRowClick, sortKey, lim
         const td = tr.insertCell();
         if (c.num) td.className = 'num';
         const v = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
-        if (c.sub && r[c.sub]) {
+        if (c.art) {
+          const wrap = document.createElement('div');
+          wrap.className = 'cell-with-art';
+          const text = document.createElement('div');
+          const main = document.createElement('div');
+          main.textContent = v ?? '';
+          text.appendChild(main);
+          if (c.sub && r[c.sub]) {
+            const sub = document.createElement('div');
+            sub.className = 'cell-sub';
+            sub.textContent = r[c.sub];
+            text.appendChild(sub);
+          }
+          wrap.append(artNode(c.art(r), { size: 36, round: c.artRound, label: v }), text);
+          td.appendChild(wrap);
+        } else if (c.sub && r[c.sub]) {
           const main = document.createElement('div');
           main.textContent = v ?? '';
           const sub = document.createElement('div');

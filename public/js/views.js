@@ -7,6 +7,7 @@ import {
 import { lineChart, columnChart, rankChart, stackedColumns, weekHourHeatmap, calendarChart, renderTable, hoursFmt } from './charts.js';
 import { int, pct, duration, hours, date, dateTime, clock, esc, reasonLabel, countryName, WEEKDAYS, MONTHS } from './format.js';
 import { dayToISO } from './data.js';
+import { artHTML, artNode, entityArt, artistArt } from './art.js';
 
 // ---- shared helpers ----
 
@@ -41,10 +42,13 @@ function entityRows(D, by, stats) {
   });
 }
 
-function entityColumns(by, W) {
+function entityColumns(by, W, D, { art = true } = {}) {
   return [
     { key: 'rank', label: '#', num: true },
-    { key: 'name', label: W[by], sub: by === 'artist' ? undefined : 'sub' },
+    {
+      key: 'name', label: W[by], sub: by === 'artist' ? undefined : 'sub',
+      art: art ? (r) => entityArt(D, by, r.id) : undefined, artRound: by === 'artist',
+    },
     { key: 'plays', label: 'Plays', num: true, fmt: int },
     { key: 'ms', label: 'Time', num: true, fmt: duration },
     ...(by === 'track' ? [] : [{ key: 'tracks', label: W.tracks[0].toUpperCase() + W.tracks.slice(1), num: true, fmt: int }]),
@@ -75,6 +79,22 @@ function rankCard(D, by, rows, { valueFmt = int, metricName = 'Plays', go, subFn
     onClick: (p) => go(exploreHash(by, data[p.dataIndex].id)),
   };
 }
+
+/** A grid of images with names and values; each opens the item in Explore. */
+function gallery(D, by, rows, valueFmt) {
+  return `<div class="gallery">${rows.map((r, n) => {
+    const { name, sub } = entityLabel(D, by, r.id);
+    return `<button type="button" class="g-item" data-href="${exploreHash(by, r.id)}">
+      ${artHTML(entityArt(D, by, r.id), { round: by === 'artist', label: name })}
+      <span class="g-name" title="${esc(name)}"><span class="g-rank">${n + 1}</span>${esc(name)}</span>
+      ${sub ? `<span class="g-sub" title="${esc(sub)}">${esc(sub)}</span>` : ''}
+      <span class="g-value">${esc(valueFmt(r.value))}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+
+const galleryCard = (id, title, sub, inner) => `<section class="card span-2" id="${id}">
+  <header class="card-head"><div><h3>${esc(title)}</h3>${sub ? `<p>${esc(sub)}</p>` : ''}</div></header>${inner}</section>`;
 
 const rankHeight = (n) => Math.max(120, n * 28 + 8);
 
@@ -136,6 +156,7 @@ function overview({ D, sel, go }) {
         ${tile('Skipped', pct(s.skips / Math.max(1, s.rows)), 'Ended with next or back')}
       </div>
     </div>
+    ${galleryCard('c-gallery', `Your top ${W.artists}`, 'By listening time', gallery(D, 'artist', topArtists.slice(0, 8), (v) => `${hoursFmt(v)} listened`))}
     ${card({ id: 'c-timeline', title: 'Listening over time', sub: `Hours per ${sel.unit}`, span: 2, height: 300 })}
     ${card({ id: 'c-years', title: 'Hours per year', height: 280 })}
     ${card({ id: 'c-year-table', title: 'Year by year', sub: `Your top ${W.artist.toLowerCase()} and most played ${W.track.toLowerCase()}`, chart: false })}
@@ -145,6 +166,7 @@ function overview({ D, sel, go }) {
 
   return {
     html,
+    after: (root) => bindButtons(root, go),
     cards: [
       {
         id: 'c-timeline',
@@ -163,7 +185,7 @@ function overview({ D, sel, go }) {
             { key: 'year', label: 'Year' },
             { key: 'ms', label: 'Time', num: true, fmt: duration },
             { key: 'plays', label: 'Plays', num: true, fmt: int },
-            { key: 'artist', label: `Top ${W.artist.toLowerCase()}` },
+            { key: 'artist', label: `Top ${W.artist.toLowerCase()}`, art: (r) => (r.artistId === undefined ? null : artistArt(D, r.artistId)), artRound: true },
             { key: 'track', label: `Top ${W.track.toLowerCase()}`, sub: 'trackSub' },
           ],
           rows: yearRows.reverse(),
@@ -198,6 +220,7 @@ function top({ D, sel, params, go }) {
       <span class="label">Rank by</span>
       ${seg([['plays', 'Plays'], ['time', 'Listening time']], metric, (v) => `#/top/${by}/${v}`)}
     </div>
+    ${galleryCard('c-gallery', `Top ${W[`${by}s`]}`, metric === 'time' ? 'By listening time' : 'By plays', gallery(D, by, chartRows.slice(0, 8), metric === 'time' ? (v) => `${hoursFmt(v)} listened` : (v) => `${int(v)} plays`))}
     ${card({ id: 'c-rank', title: `Top ${N} ${W[`${by}s`]}`, sub: metric === 'time' ? 'By listening time' : `By plays · ${minLabel(sel.minMs).toLowerCase()}`, span: 2, height: rankHeight(Math.min(N, rows.length)) })}
     ${card({
       id: 'c-all', title: `All ${W[`${by}s`]}`, sub: `${int(rows.length)} in this period · click a row for details`, span: 2, chart: false, scroll: true,
@@ -214,7 +237,7 @@ function top({ D, sel, params, go }) {
     after(root) {
       bindButtons(root, go);
       const wrap = root.querySelector('#c-all .table-wrap');
-      const columns = entityColumns(by, W);
+      const columns = entityColumns(by, W, D);
       const draw = (q) => {
         const needle = q.trim().toLowerCase();
         const shown = needle ? rows.filter((r) => r.name.toLowerCase().includes(needle) || (r.sub ?? '').toLowerCase().includes(needle)) : rows;
@@ -295,7 +318,7 @@ function repeat({ D, sel, go }) {
         id: 'c-loyal',
         table: () => ({
           columns: [
-            { key: 'name', label: W.artist },
+            { key: 'name', label: W.artist, art: (r) => artistArt(D, r.id), artRound: true },
             { key: 'years', label: 'Years played', num: true, fmt: int },
             { key: 'spanLabel', label: 'From – to', num: true },
             { key: 'plays', label: 'Plays', num: true, fmt: int },
@@ -487,7 +510,7 @@ function discovery({ D, sel, go }) {
         table: () => ({
           columns: [
             { key: 'year', label: 'Year' },
-            { key: 'name', label: `#1 ${W.artist.toLowerCase()}`, sub: 'secondLabel' },
+            { key: 'name', label: `#1 ${W.artist.toLowerCase()}`, sub: 'secondLabel', art: (r) => (r.id === undefined ? null : artistArt(D, r.id)), artRound: true },
             { key: 'ms', label: 'Time', num: true, fmt: duration },
             { key: 'share', label: 'Share of year', num: true, fmt: pct },
             { key: 'fresh', label: `New ${W.artists}`, num: true, fmt: int },
@@ -644,7 +667,10 @@ function explore({ D, sel, params, go }) {
         b.type = 'button';
         b.className = 'result';
         const left = document.createElement('span');
-        left.textContent = h.name;
+        left.className = 'result-main';
+        const label = document.createElement('span');
+        label.textContent = h.name;
+        left.append(artNode(entityArt(D, h.by, h.id), { size: 32, round: h.by === 'artist', label: h.name }), label);
         const right = document.createElement('span');
         right.className = 'kind';
         right.textContent = `${h.sub} · ${int(h.total)} plays`;
@@ -669,7 +695,7 @@ function explore({ D, sel, params, go }) {
     const W = words(sel.kind);
     const artists = [...sel.group('artist')].sort((a, b) => b.ms - a.ms).slice(0, 12);
     const tracks = sel.group('track').slice(0, 12);
-    const chip = (b, i, label) => `<button type="button" class="chip" data-href="${exploreHash(b, i)}">${esc(label)}</button>`;
+    const chip = (b, i, label) => `<button type="button" class="chip" data-href="${exploreHash(b, i)}">${artHTML(entityArt(D, b, i), { round: b === 'artist', label })}${esc(label)}</button>`;
     return {
       html: `${searchHtml}
         <section class="card span-2"><header class="card-head"><div><h3>Start with your top ${W.artists}</h3><p>Or search above for anything you've played</p></div></header>
@@ -696,7 +722,13 @@ function explore({ D, sel, params, go }) {
       meta += ` · <button type="button" data-href="${exploreHash('album', albumId)}">${esc(D.albums[albumId].name)}</button>`;
     }
   }
-  const head = `<div class="entity-head"><span class="pill">${typeName}</span><h2>${esc(label.name)}</h2><span class="meta">${meta}</span></div>`;
+  const head = `<div class="entity-head">
+    ${artHTML(entityArt(D, by, id), { round: by === 'artist', label: label.name })}
+    <div class="entity-text">
+      <div class="row"><span class="pill">${typeName}</span><h2>${esc(label.name)}</h2></div>
+      ${meta ? `<span class="meta">${meta}</span>` : ''}
+    </div>
+  </div>`;
 
   if (!sub.length) {
     return {
@@ -786,7 +818,7 @@ function explore({ D, sel, params, go }) {
     cards.push({
       id: 'c-ent-tracks',
       table: () => ({
-        columns: entityColumns('track', W).filter((c) => by !== 'album' || c.key !== 'sub'),
+        columns: entityColumns('track', W, D, { art: by === 'artist' }),
         rows: trackStats.map((t) => (by === 'artist' ? { ...t, sub: D.albums[D.items.album[t.id]].name } : t)),
         onRowClick: (r) => go(exploreHash('track', r.id)),
       }),
@@ -796,7 +828,7 @@ function explore({ D, sel, params, go }) {
     cards.push({
       id: 'c-ent-albums',
       table: () => ({
-        columns: entityColumns('album', W).filter((c) => c.key !== 'name').toSpliced(1, 0, { key: 'name', label: 'Album' }),
+        columns: entityColumns('album', W, D).map((c) => (c.key === 'name' ? { ...c, sub: undefined } : c)),
         rows: albumStats,
         onRowClick: (r) => go(exploreHash('album', r.id)),
       }),

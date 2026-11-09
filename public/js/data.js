@@ -92,6 +92,14 @@ function prepare(raw) {
     }
   }
 
+  // Each artist's most played track, used to identify the right artist when looking up photos
+  const creatorTopItem = new Int32Array(raw.creators.length).fill(-1);
+  for (let it = 0; it < itemCount; it++) {
+    const c = itemCreator[it];
+    const best = creatorTopItem[c];
+    if (best < 0 || itemTotal[it] > itemTotal[best]) creatorTopItem[c] = it;
+  }
+
   let minDay = Infinity;
   let maxDay = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -119,7 +127,7 @@ function prepare(raw) {
     countries: raw.countries,
     reasonsStart: raw.reasonsStart,
     reasonsEnd: raw.reasonsEnd,
-    creatorFirst, itemFirst, itemTotal, creatorTotal, albumTotal,
+    creatorFirst, itemFirst, itemTotal, creatorTotal, albumTotal, creatorTopItem,
     stats: raw.stats,
   };
 }
