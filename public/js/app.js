@@ -1,7 +1,7 @@
-import { loadDataset, selectPlays, dayToISO, isoToDay, dayOfYMD } from './data.js';
+import { loadDataset, selectPlays, dayToISO, isoToDay, dayOfYMD, applyCreditMode } from './data.js';
 import { groupStats, summarize, pickUnit } from './aggregate.js';
 import { mount, disposeIn, renderTable } from './charts.js';
-import { date } from './format.js';
+import { date, int, pct } from './format.js';
 import { VIEWS } from './views.js';
 import { artworkEnabled, setArtworkEnabled, hydrateArt } from './art.js';
 
@@ -29,6 +29,7 @@ const filters = {
   to: store.get('to', null),
   kind: store.get('kind', 'music'),
   minMs: store.get('minMs', 30000),
+  credits: store.get('credits', 'all'),
 };
 
 // ---- theme ----
@@ -95,6 +96,9 @@ function setupFilters() {
   period.value = filters.period;
   $('#f-kind').value = filters.kind;
   $('#f-min').value = String(filters.minMs);
+  if (!['all', 'first'].includes(filters.credits)) filters.credits = 'all';
+  $('#f-credits').value = filters.credits;
+  if (D.creditMode !== filters.credits) applyCreditMode(D, filters.credits);
   $('#f-from').min = $('#f-to').min = dayToISO(D.minDay);
   $('#f-from').max = $('#f-to').max = dayToISO(D.maxDay);
   $('#f-from').value = filters.from ?? dayToISO(D.minDay);
@@ -105,6 +109,10 @@ function setupFilters() {
     filters.period = period.value;
     filters.kind = $('#f-kind').value;
     filters.minMs = Number($('#f-min').value);
+    if ($('#f-credits').value !== filters.credits) {
+      filters.credits = $('#f-credits').value;
+      applyCreditMode(D, filters.credits);
+    }
     filters.from = $('#f-from').value || null;
     filters.to = $('#f-to').value || null;
     $('#custom-range').hidden = filters.period !== 'custom';
@@ -195,13 +203,22 @@ async function start() {
   } catch (err) {
     viewEl.innerHTML = err.message === 'missing-data'
       ? `<div class="state-msg"><p><b>Your dataset hasn't been built yet.</b></p>
-         <p>Put your export in <code>Spotify Extended Streaming History/</code>, then run <code>npm run prepare-data</code> and reload.</p></div>`
+         <p>Put your export in <code>Spotify Extended Streaming History/</code>, then run <code>npm run import</code> and reload.</p></div>`
       : `<div class="state-msg">Something went wrong loading your data: ${String(err.message).replace(/</g, '&lt;')}</div>`;
     $('#range-label').textContent = '';
     return;
   }
   setupFilters();
+  showCreditsStatus();
   render();
+}
+
+function showCreditsStatus() {
+  const c = D.creditsInfo;
+  const el = $('#credits-status');
+  if (!c || !c.checked) return;
+  el.textContent = `Artist credits checked on Deezer for ${int(c.checked)} of ${int(c.total)} tracks (${pct(c.playsCovered / Math.max(1, c.playsTotal))} of plays).`;
+  el.hidden = false;
 }
 
 start();

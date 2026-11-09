@@ -1,5 +1,5 @@
 // Aggregations over a selection of play indices. All functions are pure.
-import { dayToDate } from './data.js';
+import { dayToDate, artistNames } from './data.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -17,8 +17,11 @@ export function summarize(D, idx, minMs) {
     plays++;
     const it = D.item[i];
     if (it >= 0 && !seenItem[it]) { seenItem[it] = 1; tracks++; }
-    const c = D.creator[i];
-    if (c >= 0 && !seenCreator[c]) { seenCreator[c] = 1; artists++; }
+    if (it < 0) continue;
+    for (let k = D.credStart[it]; k < D.credStart[it + 1]; k++) {
+      const c = D.credIds[k];
+      if (!seenCreator[c]) { seenCreator[c] = 1; artists++; }
+    }
   }
   return {
     ms, plays, skips, tracks, artists,
@@ -72,10 +75,28 @@ export function timeline(D, idx, minMs, unit) {
 
 // ---- grouping by track / artist / album ----
 
-export function entityKeyFn(D, by) {
-  if (by === 'track') return (i) => D.item[i];
-  if (by === 'artist') return (i) => D.creator[i];
-  return (i) => (D.item[i] >= 0 ? D.items.album[D.item[i]] : -1);
+/**
+ * Call fn(id) for each track, artist or album a play counts towards. A play counts once for its
+ * track and album, and once for every credited artist (see applyCreditMode).
+ */
+export function forEachEntity(D, by, i, fn) {
+  const it = D.item[i];
+  if (it < 0) return;
+  if (by === 'track') fn(it);
+  else if (by === 'album') fn(D.items.album[it]);
+  else for (let k = D.credStart[it]; k < D.credStart[it + 1]; k++) fn(D.credIds[k]);
+}
+
+/** The plays in a selection that count towards one track, artist or album. */
+export function playsOf(D, idx, by, id) {
+  const out = [];
+  for (let j = 0; j < idx.length; j++) {
+    const i = idx[j];
+    let hit = false;
+    forEachEntity(D, by, i, (e) => { if (e === id) hit = true; });
+    if (hit) out.push(i);
+  }
+  return Int32Array.from(out);
 }
 
 export function entityCount(D, by) {
@@ -85,7 +106,7 @@ export function entityCount(D, by) {
 }
 
 export function entityLabel(D, by, id) {
-  if (by === 'track') return { name: D.items.name[id], sub: D.creators[D.items.creator[id]] };
+  if (by === 'track') return { name: D.items.name[id], sub: artistNames(D, id) };
   if (by === 'artist') return { name: D.creators[id], sub: '' };
   const a = D.albums[id];
   return { name: a.name, sub: D.creators[a.creator] };
@@ -97,7 +118,6 @@ export function entityLabel(D, by, id) {
  */
 export function groupStats(D, idx, minMs, by) {
   const size = entityCount(D, by);
-  const key = entityKeyFn(D, by);
   const plays = new Uint32Array(size);
   const ms = new Float64Array(size);
   const skips = new Uint32Array(size);
@@ -108,10 +128,8 @@ export function groupStats(D, idx, minMs, by) {
   const lastSeenDay = new Int32Array(size).fill(-1);
   const trackSets = by === 'track' ? null : new Map();
 
-  for (let j = 0; j < idx.length; j++) {
-    const i = idx[j];
-    const id = key(i);
-    if (id < 0) continue;
+  let i = 0;
+  const add = (id) => {
     rows[id]++;
     ms[id] += D.ms[i];
     if (D.skip[i]) skips[id]++;
@@ -127,6 +145,10 @@ export function groupStats(D, idx, minMs, by) {
         s.add(D.item[i]);
       }
     }
+  };
+  for (let j = 0; j < idx.length; j++) {
+    i = idx[j];
+    forEachEntity(D, by, i, add);
   }
 
   const out = [];
@@ -214,12 +236,13 @@ export function loyalArtists(D, idx, minMs, limit = 15) {
   const plays = new Map();
   for (let j = 0; j < idx.length; j++) {
     const i = idx[j];
-    const c = D.creator[i];
-    if (c < 0 || D.ms[i] < minMs) continue;
-    let s = years.get(c);
-    if (!s) years.set(c, (s = new Set()));
-    s.add(D.year[i]);
-    plays.set(c, (plays.get(c) ?? 0) + 1);
+    if (D.ms[i] < minMs) continue;
+    forEachEntity(D, 'artist', i, (c) => {
+      let s = years.get(c);
+      if (!s) years.set(c, (s = new Set()));
+      s.add(D.year[i]);
+      plays.set(c, (plays.get(c) ?? 0) + 1);
+    });
   }
   return [...years.entries()]
     .map(([id, s]) => ({ id, years: s.size, plays: plays.get(id), span: [Math.min(...s), Math.max(...s)] }))
@@ -272,14 +295,25 @@ export function discoveries(D, idx, unit) {
     if (it < 0) continue;
     const k = bucketKey(D, i, unit) - base;
     if (D.itemFirst[it] === i) tracks[k]++;
-    if (D.creatorFirst[D.creator[i]] === i) artists[k]++;
+    forEachEntity(D, 'artist', i, (c) => { if (D.creatorFirst[c] === i) artists[k]++; });
   }
   return { keys, labels: keys.map((k) => bucketLabel(k, unit)), artists: Array.from(artists), tracks: Array.from(tracks) };
 }
 
 /** Listening time per bucket for a fixed set of entity ids. */
 export function entityTimelines(D, idx, by, ids, unit) {
-  return timelinesBy(D, idx, entityKeyFn(D, by), ids, unit);
+  const keys = bucketRange(D, idx, unit);
+  const base = keys[0] ?? 0;
+  const pos = new Map(ids.map((id, n) => [id, n]));
+  const series = ids.map(() => new Float64Array(keys.length));
+  for (let j = 0; j < idx.length; j++) {
+    const i = idx[j];
+    forEachEntity(D, by, i, (id) => {
+      const n = pos.get(id);
+      if (n !== undefined) series[n][bucketKey(D, i, unit) - base] += D.ms[i];
+    });
+  }
+  return { keys, labels: keys.map((k) => bucketLabel(k, unit)), series: series.map((s) => Array.from(s)) };
 }
 
 /** Listening time per bucket for each id returned by key(i); other ids are ignored. */

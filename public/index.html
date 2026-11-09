@@ -63,6 +63,13 @@
         <option value="60000">1 minute</option>
       </select>
     </label>
+    <label class="field">
+      <span title="A track by two artists counts as a play for each of them">Collaborations</span>
+      <select id="f-credits">
+        <option value="all" selected>All credited artists</option>
+        <option value="first">First artist only</option>
+      </select>
+    </label>
   </form>
 
   <main id="view" class="view" aria-live="polite">
@@ -72,6 +79,7 @@
   <footer class="footer">
     Your listening data stays on your computer. Times are shown in your browser's time zone.
     Artist images and covers are looked up by name on Deezer, iTunes and TheAudioDB (turn off with the image button).
+    <span id="credits-status" hidden></span>
   </footer>
 </body>
 </html>
