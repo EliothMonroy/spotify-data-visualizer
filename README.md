@@ -1,13 +1,13 @@
 # Spotify Data Visualizer
 
 Local dashboards for your **Spotify Extended Streaming History** export.
-Everything runs on your machine — no Spotify API calls, no external requests.
+Everything runs on your machine: no Spotify API calls, no CDN, no external requests.
 
 ## Quick start
 
 1. Put your export folder in the project root, named `Spotify Extended Streaming History/`
    (it holds the `Streaming_History_Audio_*.json` files). It is git-ignored.
-2. Install and run:
+2. Install and run (Node 20+; dependencies install into the local `node_modules/` only):
 
    ```sh
    npm install
@@ -17,4 +17,49 @@ Everything runs on your machine — no Spotify API calls, no external requests.
 3. Open http://localhost:5173
 
 `npm start` builds `data/plays.json` from your export the first time it runs.
-After adding a new export, rebuild with `npm run prepare-data`.
+After downloading a newer export, rebuild with `npm run prepare-data`
+(or `npm run prepare-data -- --source /path/to/export`).
+
+## Dashboards
+
+All dashboards share one filter row: **period** (all time, last 12 months, a year, or a
+custom range), **content** (music, podcasts, or everything) and **what counts as a play**.
+
+| View | What it shows |
+|---|---|
+| Overview | Total hours, plays, unique tracks/artists, listening over time, hours per year, year-by-year top artist & track |
+| Top charts | Top artists, tracks and albums by plays or listening time, plus a full sortable, filterable table |
+| On repeat | Play-count distribution, longest back-to-back runs, most plays in one day, most played albums, artists you replay most, artists across the most years |
+| Habits | Weekday × hour heatmap, hour of day, day of week, month of year, a calendar of every day you listened |
+| Discovery | New artists and tracks over time, your top 5 artists over time, best new finds, your #1 artist each year |
+| Devices | Device types over time, how plays start and end, shuffle/offline/private-session rates, devices and countries |
+| Explore | Search any artist, track, album or podcast for its own stats, timeline and play log |
+
+Every chart has a **Table** button with the same numbers. Click a bar or a table row to open that
+artist, track or album in Explore. The theme follows your system; the button in the top right switches it.
+
+## How the numbers are computed
+
+- **Plays** count listens of at least 30 seconds by default (the same rule Spotify uses for a
+  stream). Change this with *Count a play after*. Listening time always includes every second.
+- **Repeat listens are kept.** Only rows that are exact copies of another row in every field are
+  removed (about 200 in a typical export; Spotify sometimes logs the same play twice).
+- **Skipped** means the play ended with the next or back button. Spotify's own `skipped` field
+  is missing for several years of history, so it isn't used.
+- **Times** are shown in your browser's time zone, based on when each play started.
+- **Albums** are grouped by album name *and* artist, so two "Greatest Hits" stay separate.
+- **Privacy:** `data/plays.json` keeps only what the dashboards need. IP addresses are dropped.
+
+## Project layout
+
+```
+scripts/prepare-data.mjs   Reads the export, writes data/plays.json
+scripts/lib/normalize.mjs  Dedupe, device grouping, compact column format
+server.mjs                 Zero-dependency static server (127.0.0.1 only)
+public/                    The dashboard (plain HTML, CSS and ES modules, no build step)
+  js/data.js               Loads the dataset, adds local-time fields
+  js/aggregate.js          All statistics
+  js/charts.js             ECharts option builders and table rendering
+  js/views.js              The seven dashboards
+test/                      node --test unit tests (npm test)
+```
