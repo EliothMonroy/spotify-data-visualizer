@@ -25,7 +25,7 @@ test('the dataset is built from the database in version 2 shape', () => {
   assert.deepEqual(d.albums[d.items.album[tb]], { name: 'Treasure Bay', creator: d.items.creator[tb] });
   const ep = d.items.name.indexOf('Episode 1');
   assert.equal(d.creators[d.albums[d.items.album[ep]].creator], 'Some Show');
-  assert.deepEqual(d.credits, { checked: 0, matched: 0, total: 1, playsCovered: 0, playsTotal: 3 });
+  assert.deepEqual(d.credits, { checked: 0, matched: 0, found: 0, playsFound: 0, total: 1, playsCovered: 0, playsTotal: 3 });
 });
 
 test('Deezer credits appear as extra artists on the track', () => {
@@ -36,7 +36,7 @@ test('Deezer credits appear as extra artists on the track', () => {
   const d = buildDatasetFromDb(db);
   const tb = d.items.name.indexOf('Treasure Bay');
   assert.deepEqual(d.items.extra[tb].map((c) => d.creators[c]), ['ANG']);
-  assert.deepEqual(d.credits, { checked: 1, matched: 1, total: 1, playsCovered: 3, playsTotal: 3 });
+  assert.deepEqual(d.credits, { checked: 1, matched: 1, found: 1, playsFound: 3, total: 1, playsCovered: 3, playsTotal: 3 });
 });
 
 test('image links are included for artists and albums', () => {
@@ -65,4 +65,22 @@ test('two writers at the same time each finish and leave a valid file', async ()
   assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'fulfilled']);
   assert.equal(JSON.parse(readFileSync(out, 'utf8')).version, 2);
   assert.deepEqual(readdirSync(dir), ['plays.json']);
+});
+
+test('credits found on MusicBrainz, including confirmed solo tracks, count as found', () => {
+  const db = seeded();
+  db.prepare("UPDATE tracks SET deezer_status = 'not_found', mb_status = 'solo' WHERE name = 'Treasure Bay'").run();
+  const d = buildDatasetFromDb(db);
+  assert.equal(d.credits.found, 1);
+  assert.equal(d.credits.playsFound, 3);
+  db.prepare("UPDATE tracks SET mb_status = 'not_found' WHERE name = 'Treasure Bay'").run();
+  assert.equal(buildDatasetFromDb(db).credits.found, 0);
+});
+
+test('MusicBrainz credits appear as extra artists too', () => {
+  const db = seeded();
+  const haris = Number(db.prepare("INSERT INTO artists (name) VALUES ('Haris')").run().lastInsertRowid);
+  db.prepare("INSERT INTO credits (track_id, artist_id, position, role, source) VALUES (1, ?, 1, 'Featured', 'musicbrainz')").run(haris);
+  const d = buildDatasetFromDb(db);
+  assert.deepEqual(d.items.extra[d.items.name.indexOf('Treasure Bay')].map((c) => d.creators[c]), ['Haris']);
 });

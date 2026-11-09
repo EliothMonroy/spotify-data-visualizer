@@ -175,3 +175,119 @@ test('a busy database counts as a temporary failure, other bugs do not', async (
   assert.equal(isTransient(new TransientError('quota')), true);
   assert.equal(isTransient(new TypeError('bug')), false);
 });
+
+// ---- MusicBrainz fallback ----
+import { checkTrackMusicBrainz, checkTrackAllSources } from '../scripts/lib/credits.mjs';
+
+const rec = (id, title, credits) => ({
+  id, title, score: 100,
+  'artist-credit': credits.map(([name, joinphrase = '']) => ({ name, joinphrase, artist: { id: `mb-${name}`, name } })),
+});
+function fakeMb(recordings = [], { fail = false } = {}) {
+  const calls = [];
+  return {
+    calls,
+    searchRecordings: async (artist, title) => {
+      calls.push(`${artist} | ${title}`);
+      if (fail) throw new TransientError('busy');
+      return recordings;
+    },
+  };
+}
+const status = (db, name) => ({ ...db.prepare('SELECT deezer_status, mb_status, mb_id FROM tracks WHERE name = ?').get(name) });
+const missedOnDeezer = () => {
+  const db = seeded();
+  db.prepare("UPDATE tracks SET deezer_status = 'not_found'").run();
+  return db;
+};
+const mbTrack = (db) => tracksToCheck(db).find((t) => t.name === 'Treasure Bay');
+
+test('a track Deezer missed gets its artists from MusicBrainz, featured artists marked', async () => {
+  const db = missedOnDeezer();
+  const mb = fakeMb([rec('r1', 'Treasure Bay', [['Kevu', ' & '], ['ANG', ' feat. '], ['Haris']])]);
+  assert.equal(await checkTrackMusicBrainz(db, mb, mbTrack(db)), 'matched');
+  assert.deepEqual(credits(db), [
+    { name: 'Kevu', source: 'spotify', position: 0, role: null },
+    { name: 'ANG', source: 'musicbrainz', position: 1, role: 'Main' },
+    { name: 'Haris', source: 'musicbrainz', position: 2, role: 'Featured' },
+  ]);
+  assert.deepEqual(status(db, 'Treasure Bay'), { deezer_status: 'not_found', mb_status: 'matched', mb_id: 'r1' });
+  assert.deepEqual(mb.calls, ['Kevu | Treasure Bay']);
+});
+
+test('a solo recording on MusicBrainz is saved as confirmed solo', async () => {
+  const db = missedOnDeezer();
+  assert.equal(await checkTrackMusicBrainz(db, fakeMb([rec('r1', 'Treasure Bay', [['Kevu']])]), mbTrack(db)), 'solo');
+  assert.equal(credits(db).length, 1);
+  assert.equal(status(db, 'Treasure Bay').mb_status, 'solo');
+});
+
+test('remixes and recordings led by someone else are not used', async () => {
+  const db = missedOnDeezer();
+  const mb = fakeMb([rec('r2', 'Treasure Bay (X Remix)', [['Kevu', ' & '], ['X']]), rec('r3', 'Treasure Bay', [['Someone', ' & '], ['Kevu']])]);
+  assert.equal(await checkTrackMusicBrainz(db, mb, mbTrack(db)), 'not_found');
+  assert.equal(credits(db).length, 1);
+  assert.equal(status(db, 'Treasure Bay').mb_status, 'not_found');
+});
+
+test('a temporary MusicBrainz failure saves nothing', async () => {
+  const db = missedOnDeezer();
+  await assert.rejects(checkTrackMusicBrainz(db, fakeMb([], { fail: true }), mbTrack(db)), TransientError);
+  assert.equal(status(db, 'Treasure Bay').mb_status, null);
+});
+
+test('tracks Deezer missed are listed for MusicBrainz only if played for 30 seconds or more', () => {
+  const db = missedOnDeezer();
+  importRows(db, [trackRow('2021-03-01T10:00:00Z', 'Short', 'ANG', 'Short', 'short1', { ms_played: 10000 })]);
+  db.prepare("UPDATE tracks SET deezer_status = 'not_found' WHERE name = 'Short'").run();
+  assert.deepEqual(tracksToCheck(db).map((t) => t.name).sort(), ['Solo', 'Treasure Bay']);
+  db.prepare("UPDATE tracks SET mb_status = 'not_found' WHERE name = 'Solo'").run();
+  assert.deepEqual(tracksToCheck(db).map((t) => t.name), ['Treasure Bay'], 'answered tracks are not listed again');
+  assert.deepEqual(tracksToCheck(db, { retryMissing: true }).map((t) => t.name).sort(), ['Short', 'Solo', 'Treasure Bay']);
+});
+
+test('checking a new track tries Deezer, then MusicBrainz when Deezer has nothing', async () => {
+  const db = seeded();
+  const mb = fakeMb([rec('r1', 'Treasure Bay', [['Kevu', ' & '], ['ANG']])]);
+  const deezer = fakeDeezer();
+  assert.equal(await checkTrackAllSources(db, { deezer, mb }, kevuTrack(db)), 'matched');
+  assert.deepEqual(status(db, 'Treasure Bay'), { deezer_status: 'not_found', mb_status: 'matched', mb_id: 'r1' });
+  assert.equal(deezer.calls.length, 2);
+});
+
+test('a track found on Deezer is not sent to MusicBrainz', async () => {
+  const db = seeded();
+  const mb = fakeMb();
+  const deezer = fakeDeezer({
+    search: [{ id: 5, title: 'Treasure Bay', artist: { name: 'KEVU' } }],
+    tracks: { 5: deezerTrack(5, [contributor(1, 'KEVU'), contributor(2, 'ang')]) },
+  });
+  assert.equal(await checkTrackAllSources(db, { deezer, mb }, kevuTrack(db)), 'matched');
+  assert.equal(mb.calls.length, 0);
+});
+
+test('a short-only track Deezer misses is not sent to MusicBrainz', async () => {
+  const db = seeded();
+  importRows(db, [trackRow('2021-03-01T10:00:00Z', 'Short', 'ANG', 'Short', 'short1', { ms_played: 10000 })]);
+  const mb = fakeMb();
+  const short = tracksToCheck(db).find((t) => t.name === 'Short');
+  assert.equal(await checkTrackAllSources(db, { deezer: fakeDeezer(), mb }, short), 'not_found');
+  assert.equal(mb.calls.length, 0);
+  assert.equal(status(db, 'Short').mb_status, null);
+});
+
+test('MusicBrainz artists use the name printed on the release, with the main name as a backup match', async () => {
+  const db = missedOnDeezer();
+  db.prepare("INSERT INTO artists (name) VALUES ('Jonathan Mendelsohn')").run();
+  const recording = {
+    id: 'r9', title: 'Treasure Bay',
+    'artist-credit': [
+      { name: 'Kevu', joinphrase: ' & ', artist: { id: 'a1', name: 'Kevu' } },
+      { name: 'Tomo Hirata', joinphrase: ' feat. ', artist: { id: 'a2', name: '平田知昌' } },
+      { name: 'J. Mendelsohn', joinphrase: '', artist: { id: 'a3', name: 'Jonathan Mendelsohn' } },
+    ],
+  };
+  assert.equal(await checkTrackMusicBrainz(db, fakeMb([recording]), mbTrack(db)), 'matched');
+  assert.deepEqual(credits(db).map((c) => c.name), ['Kevu', 'Tomo Hirata', 'Jonathan Mendelsohn']);
+  assert.equal(db.prepare("SELECT count(*) n FROM artists WHERE name IN ('平田知昌', 'J. Mendelsohn')").get().n, 0);
+});

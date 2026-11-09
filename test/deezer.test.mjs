@@ -70,3 +70,11 @@ test('repeated quota errors, HTTP errors and non-JSON answers are transient, nev
   await assert.rejects(createDeezer({ limiter: quickLimiter(), fetch: async () => response(200, '<html>busy</html>') }).track(1), TransientError);
   await assert.rejects(createDeezer({ limiter: quickLimiter(), fetch: async () => { throw new Error('ECONNRESET'); } }).track(1), TransientError);
 });
+
+test('a limiter for a strict service never speeds up when slowing down', () => {
+  const limiter = createLimiter({ max: 4, min: 2 });
+  limiter.slowDown();
+  assert.equal(limiter.stats().max, 2);
+  limiter.slowDown();
+  assert.equal(limiter.stats().max, 2);
+});

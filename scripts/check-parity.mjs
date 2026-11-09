@@ -49,4 +49,4 @@ if (problems.length) {
   console.error(`parity FAILED:\n  ${problems.join('\n  ')}`);
   process.exit(1);
 }
-console.log(`parity OK ("First artist only", ${credits.toLocaleString()} Deezer credits ignored): ${after.n.toLocaleString()} plays, ${after.items.count.toLocaleString()} tracks, ${before.creators.length.toLocaleString()} artists, ${after.albums.length.toLocaleString()} albums`);
+console.log(`parity OK ("First artist only", ${credits.toLocaleString()} Deezer and MusicBrainz credits ignored): ${after.n.toLocaleString()} plays, ${after.items.count.toLocaleString()} tracks, ${before.creators.length.toLocaleString()} artists, ${after.albums.length.toLocaleString()} albums`);

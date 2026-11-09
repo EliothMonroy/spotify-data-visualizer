@@ -33,13 +33,15 @@ twice (`--force` overrides this). `npm run prepare-data` still works as another 
 Spotify's export names only **one artist per play**, so collaborations count for the first
 artist only. *Treasure Bay*, for example, is credited to Kevu, but Deezer lists **Kevu and ANG**.
 `npm run credits` checks each track on Deezer for every credited artist, including featured
-ones. Each artist then gets **full credit** for every play: one play of Treasure Bay counts as
-1 play for Kevu and 1 for ANG.
+ones. Tracks Deezer doesn't have are then looked up on [MusicBrainz](https://musicbrainz.org),
+the free, community-run music database (only tracks you played for 30 seconds or more). Each
+artist then gets **full credit** for every play: one play of Treasure Bay counts as 1 play for
+Kevu and 1 for ANG.
 
 ```sh
 caffeinate -i npm run credits          # every track; caffeinate keeps a Mac awake
 npm run credits -- --top 16000         # only your 16,000 most played unchecked tracks
-npm run credits -- --retry-missing     # try again the tracks Deezer didn't have
+npm run credits -- --retry-missing     # try again the tracks neither service had
 ```
 
 - **Most-played tracks go first**, so stopping early still fixes most counts. With about 38,000
@@ -52,13 +54,19 @@ npm run credits -- --retry-missing     # try again the tracks Deezer didn't have
   | All | 100% | ~2 h 40 min (~3 h with retries) |
 - **Each track is looked up once**, and every answer is saved straight away. **Ctrl+C** stops
   safely, and running it again continues where it left off.
-- **It stays under Deezer's limit** (about 8 requests a second; Deezer allows 50 per 5 seconds)
-  and slows down if Deezer pushes back. While it runs, the dashboard's own image lookups slow to
-  one per second.
-- **Credits are only added on a confident match.** The Deezer track must have the same title
-  and list Spotify's artist. Spotify's artist is always kept, and Deezer can only add artists.
+- **It stays under each service's limit.** Deezer: about 8 requests a second (it allows 50 per 5
+  seconds), slowing down if Deezer pushes back. While it runs, the dashboard's own image lookups
+  slow to one per second. MusicBrainz: one request every 1.1 seconds, as it asks; its occasional
+  "busy" answers are retried after a short wait. Checking the ~6,000 tracks Deezer misses in a
+  typical history takes about 1 h 40 min.
+- **Credits are only added on a confident match.** The track must have the same title, the same
+  lead artist, and the same version (a remix never stands in for the original). Spotify's artist
+  is always kept, and the services can only add artists. When MusicBrainz lists only Spotify's
+  artist, the track is saved as *confirmed solo*. Tracks neither service has keep just their
+  Spotify artist.
+- **Every credit records where it came from** (`spotify`, `deezer` or `musicbrainz`).
 - **When it finishes or stops,** `data/plays.json` is rebuilt. Reload the dashboard to see the
-  new numbers. The footer shows how many tracks have been checked so far.
+  new numbers. The footer shows for how many tracks all artists are known.
 
 The **Collaborations** filter switches between *All credited artists* (the default) and
 *First artist only*, which gives the numbers as Spotify's export has them.
@@ -128,6 +136,7 @@ scripts/lib/import.mjs     Import, duplicate detection, artwork cache migration
 scripts/lib/export.mjs     Database -> compact dashboard file
 scripts/lib/credits.mjs    Matching a track on Deezer and saving its credits and images
 scripts/lib/deezer.mjs     Deezer client and rate limiter
+scripts/lib/musicbrainz.mjs  MusicBrainz client (fallback for artist credits)
 scripts/lib/names.mjs      Name and title matching
 scripts/lib/normalize.mjs  Device grouping and play flags
 server.mjs                 Zero-dependency static server (127.0.0.1 only)
