@@ -87,7 +87,7 @@ const server = createServer(async (req, res) => {
   if (!info || !info.isFile()) {
     const missingData = urlPath.startsWith('/data/');
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end(missingData ? 'Dataset not built yet. Run: npm run prepare-data' : 'Not found');
+    res.end(missingData ? 'Dataset not built yet. Run: npm run import' : 'Not found');
     return;
   }
 
