@@ -6,10 +6,32 @@ import { stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createGzip } from 'node:zlib';
+import { createArtworkService } from './server/artwork.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 5173;
 const HOST = process.env.HOST || '127.0.0.1';
+// Artwork lookups contact Deezer, iTunes and TheAudioDB. Set ARTWORK=off to keep everything offline.
+const ARTWORK = !/^(off|0|false|no)$/i.test(process.env.ARTWORK ?? '');
+const artwork = ARTWORK ? createArtworkService({ cacheFile: join(root, 'data', 'artwork-cache.json') }) : null;
+
+function sendJSON(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(JSON.stringify(body));
+}
+
+async function handleArtwork(url, res) {
+  if (!artwork) return sendJSON(res, 404, { disabled: true });
+  const type = url.searchParams.get('type');
+  const artist = (url.searchParams.get('artist') ?? '').slice(0, 300).trim();
+  const name = (url.searchParams.get('name') ?? '').slice(0, 300).trim();
+  if (!artist || (type !== 'artist' && type !== 'album') || (type === 'album' && !name)) {
+    return sendJSON(res, 400, { error: 'Expected type=artist&artist=… or type=album&artist=…&name=…' });
+  }
+  const hint = (url.searchParams.get('hint') ?? '').slice(0, 300).trim();
+  const hit = await artwork.lookup(type, artist, name, hint);
+  return sendJSON(res, 200, hit ? { thumb: hit.thumb, full: hit.full, source: hit.source, link: hit.link } : { thumb: null });
+}
 
 // URL prefix -> folder on disk
 const mounts = [
@@ -45,7 +67,12 @@ const server = createServer(async (req, res) => {
     res.writeHead(405).end();
     return;
   }
-  const urlPath = new URL(req.url, 'http://localhost').pathname;
+  const url = new URL(req.url, 'http://localhost');
+  const urlPath = url.pathname;
+  if (urlPath === '/api/artwork') {
+    handleArtwork(url, res).catch(() => sendJSON(res, 500, { thumb: null }));
+    return;
+  }
   const file = resolvePath(urlPath);
   let info;
   try {
@@ -78,4 +105,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Spotify Data Visualizer running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.log(ARTWORK ? 'Artwork: on (Deezer, iTunes, TheAudioDB). Start with ARTWORK=off to disable.' : 'Artwork: off');
 });
