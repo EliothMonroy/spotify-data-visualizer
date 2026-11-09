@@ -1,73 +1,31 @@
 // Artist images and album covers from free, key-less sources.
-// Lookups send only an artist / album name. Results (including misses) are cached on disk
-// so each name is looked up once.
+// Lookups send only an artist / album name. Answers (including "no image") are saved on the
+// artist or album row in the database, so each one is looked up once.
 //
 // Artists: Deezer, then TheAudioDB (free shared key "123", ~30 requests/min)
 // Albums:  Deezer, then the iTunes Search API (~20 requests/min)
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { normalize, normalizeAlbum, pickArtist, pickAlbum } from '../scripts/lib/names.mjs';
+import { hasDeezerImage } from '../scripts/lib/deezer.mjs';
+import { getKv } from '../scripts/lib/db.mjs';
+
+export { normalize, normalizeAlbum, pickArtist, pickAlbum };
 
 const MISS_RETRY_MS = 14 * 24 * 3600 * 1000; // try again for missing art after two weeks
 const USER_AGENT = 'spotify-data-visualizer/1.0 (personal, local use)';
-
-// ---- name matching (pure, exported for tests) ----
-
-/** Lowercase, strip accents, punctuation and filler so "Beyoncé" ≈ "Beyonce", "The Weeknd" ≈ "Weeknd". */
-export function normalize(s) {
-  return String(s ?? '')
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/^the /, '')
-    .trim();
-}
-
-/** Album titles vary in suffixes: "Stories (Deluxe)", "Louder - Radio Edit", "X - EP". */
-export function normalizeAlbum(s) {
-  return normalize(
-    String(s ?? '')
-      .replace(/\s*[([][^)\]]*(edition|deluxe|remaster|version|expanded|anniversary|bonus|explicit|single|ep)[^)\]]*[)\]]/gi, '')
-      .replace(/\s+-\s+(single|ep|radio edit|remastered.*|deluxe.*)$/i, ''),
-  );
-}
-
-/** Exact (normalized) name match; when several artists share the name, the one with most fans. */
-export function pickArtist(results, name, nameOf = (r) => r.name) {
-  const want = normalize(name);
-  const same = (results ?? []).filter((r) => normalize(nameOf(r)) === want);
-  return same.sort((a, b) => (b.nb_fan ?? 0) - (a.nb_fan ?? 0))[0] ?? null;
-}
-
-export function pickAlbum(results, artist, album, { artistOf, titleOf }) {
-  const wantArtist = normalize(artist);
-  const wantAlbum = normalizeAlbum(album);
-  const sameArtist = (results ?? []).filter((r) => {
-    const a = normalize(artistOf(r));
-    return a === wantArtist || a.includes(wantArtist) || wantArtist.includes(a);
-  });
-  return (
-    sameArtist.find((r) => normalizeAlbum(titleOf(r)) === wantAlbum) ??
-    sameArtist.find((r) => {
-      const t = normalizeAlbum(titleOf(r));
-      return t && wantAlbum && (t.startsWith(wantAlbum) || wantAlbum.startsWith(t));
-    }) ??
-    null
-  );
-}
+const BACKFILL_GAP_MS = 1000; // Deezer pace while `npm run credits` is running
 
 // ---- polite per-host request queue ----
 
 class HostQueue {
   constructor(minGapMs) {
     this.minGapMs = minGapMs;
+    this.gap = () => this.minGapMs;
     this.chain = Promise.resolve();
     this.last = 0;
   }
   run(task) {
     const next = this.chain.then(async () => {
-      const wait = this.last + this.minGapMs - Date.now();
+      const wait = this.last + this.gap() - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       try {
         return await task();
@@ -115,7 +73,6 @@ async function getJSON(host, url) {
 }
 
 const enc = encodeURIComponent;
-const hasDeezerImage = (url) => url && !/\/images\/(artist|cover)\/\//.test(url);
 
 // ---- providers ----
 
@@ -169,56 +126,59 @@ async function itunesAlbum(artist, album) {
   };
 }
 
-// ---- cache + public API ----
+// ---- database-backed lookups ----
 
-export function createArtworkService({ cacheFile }) {
-  let cache = new Map();
+/**
+ * db: the open database. now: clock (for tests). gaps: optional per-service gaps in ms (for tests).
+ * While a credits backfill is running (fresh heartbeat), Deezer lookups slow to 1 per second so the
+ * two together stay under Deezer's limit.
+ */
+export function createArtworkService({ db, now = Date.now, gaps = {} }) {
+  for (const [host, ms] of Object.entries(gaps)) queues[host].minGapMs = ms;
+  queues.deezer.gap = () => {
+    const beat = Number(getKv(db, 'credits_heartbeat') ?? 0);
+    return now() - beat < 30000 ? Math.max(BACKFILL_GAP_MS, queues.deezer.minGapMs) : queues.deezer.minGapMs;
+  };
   const inflight = new Map();
-  let saveTimer = null;
-
-  const loaded = readFile(cacheFile, 'utf8')
-    .then((txt) => { cache = new Map(Object.entries(JSON.parse(txt))); })
-    .catch(() => {});
-
-  const save = () => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      try {
-        await mkdir(dirname(cacheFile), { recursive: true });
-        await writeFile(cacheFile, JSON.stringify(Object.fromEntries(cache)));
-      } catch (err) {
-        console.warn('Could not save artwork cache:', err.message);
-      }
-    }, 2000);
+  const q = {
+    artist: db.prepare('SELECT * FROM artists WHERE name = ?'),
+    album: db.prepare('SELECT al.* FROM albums al JOIN artists ar ON ar.id = al.artist_id WHERE al.name = ? AND ar.name = ?'),
+  };
+  const save = (table, id, hit) => {
+    if (hit) {
+      db.prepare(`UPDATE ${table} SET image_status = 'found', image_thumb = ?, image_full = ?, image_source = ?, image_link = ?,
+        image_checked_at = ? WHERE id = ?`).run(hit.thumb, hit.full, hit.source, hit.link ?? null, now(), id);
+    } else {
+      db.prepare(`UPDATE ${table} SET image_status = 'none', image_checked_at = ? WHERE id = ? AND (image_status IS NULL OR image_status = 'none')`).run(now(), id);
+    }
   };
 
-  async function resolve(key, providers) {
-    for (const p of providers) {
-      const hit = await p();
-      if (hit) return hit;
-    }
-    return null;
-  }
-
   async function lookup(type, artist, name, hint) {
-    await loaded;
-    const key = type === 'artist' ? `artist:${normalize(artist)}` : `album:${normalize(artist)}|${normalizeAlbum(name)}`;
-    const cached = cache.get(key);
-    if (cached && (!cached.miss || Date.now() - cached.t < MISS_RETRY_MS)) return cached.miss ? null : cached;
-    if (inflight.has(key)) return inflight.get(key);
+    const table = type === 'artist' ? 'artists' : 'albums';
+    const row = type === 'artist' ? q.artist.get(artist) : q.album.get(name, artist);
+    if (row?.image_status === 'found' && row.image_thumb) {
+      return { thumb: row.image_thumb, full: row.image_full ?? row.image_thumb, source: row.image_source, link: row.image_link };
+    }
+    if (row?.image_status === 'none' && now() - (row.image_checked_at ?? 0) < MISS_RETRY_MS) return null;
 
+    const key = type === 'artist' ? `artist:${normalize(artist)}` : `album:${normalize(artist)}|${normalizeAlbum(name)}`;
+    if (inflight.has(key)) return inflight.get(key);
     const providers = type === 'artist'
       ? [() => deezerArtist(artist, hint), () => audiodbArtist(artist)]
       : [() => deezerAlbum(artist, name), () => itunesAlbum(artist, name)];
-
-    const p = resolve(key, providers)
+    const p = (async () => {
+      for (const provider of providers) {
+        const hit = await provider();
+        if (hit) return hit;
+      }
+      return null;
+    })()
       .then((hit) => {
-        cache.set(key, hit ? { ...hit, t: Date.now() } : { miss: true, t: Date.now() });
-        save();
+        if (row) save(table, row.id, hit);
         return hit;
       })
       .catch((err) => {
-        // Network trouble: don't cache, so it is retried next time.
+        // Network trouble: nothing is saved, so it is tried again next time.
         if (!(err instanceof TransientError)) console.warn('Artwork lookup failed:', err.message);
         return null;
       })
@@ -227,5 +187,5 @@ export function createArtworkService({ cacheFile }) {
     return p;
   }
 
-  return { lookup, size: () => cache.size };
+  return { lookup, deezerGap: () => queues.deezer.gap() };
 }

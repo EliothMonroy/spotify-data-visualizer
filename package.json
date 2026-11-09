@@ -5,13 +5,15 @@
   "description": "Local dashboards for your Spotify Extended Streaming History export",
   "type": "module",
   "scripts": {
-    "prepare-data": "node scripts/prepare-data.mjs",
+    "import": "node scripts/import.mjs",
+    "prepare-data": "node scripts/import.mjs",
+    "credits": "node scripts/credits.mjs",
     "serve": "node server.mjs",
-    "start": "node scripts/prepare-data.mjs --if-missing && node server.mjs",
+    "start": "node scripts/import.mjs --if-missing && node server.mjs",
     "test": "node --test"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "dependencies": {
     "echarts": "6.1.0"

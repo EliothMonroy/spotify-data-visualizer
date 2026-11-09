@@ -1,4 +1,5 @@
-// Artist photos and album covers, looked up through the local server (/api/artwork).
+// Artist photos and album covers. Links already saved in the database come with the dataset;
+// anything else is looked up through the local server (/api/artwork).
 // Images load only when scrolled into view; initials show until (or unless) one arrives.
 import { esc } from './format.js';
 
@@ -45,6 +46,16 @@ function pump() {
   }
 }
 
+// Ask the server once whether artwork is allowed (it is off with ARTWORK=off or without a database).
+let statusCheck = null;
+function serverAllowsArt() {
+  statusCheck ??= fetch('api/artwork/status')
+    .then((r) => (r.ok ? r.json() : { enabled: false }))
+    .then((j) => { if (j?.enabled !== true) { available = false; syncRootClass(); } })
+    .catch(() => {});
+  return statusCheck;
+}
+
 export function fetchArt({ type, artist, name = '', hint = '' }) {
   const key = `${type}|${artist}|${name}`;
   if (!results.has(key)) {
@@ -66,16 +77,18 @@ export function fetchArt({ type, artist, name = '', hint = '' }) {
 
 const cleanTitle = (t) => String(t ?? '').replace(/\s*[([].*$/, '').replace(/\s+-\s+.*$/, '').trim();
 
+const saved = (img) => (img ? { thumb: img[0], full: img[1], source: img[2], link: img[3] } : undefined);
+
 export function artistArt(D, c) {
   if (c < 0 || D.creatorKind[c] !== 0) return null;
   const top = D.creatorTopItem[c];
-  return { type: 'artist', artist: D.creators[c], hint: top >= 0 ? cleanTitle(D.items.name[top]) : '' };
+  return { type: 'artist', artist: D.creators[c], hint: top >= 0 ? cleanTitle(D.items.name[top]) : '', direct: saved(D.creatorImages[c]) };
 }
 
 export function albumArt(D, a) {
   const al = D.albums[a];
   if (!al || D.creatorKind[al.creator] !== 0) return null;
-  return { type: 'album', artist: D.creators[al.creator], name: al.name };
+  return { type: 'album', artist: D.creators[al.creator], name: al.name, direct: saved(D.albumImages[a]) };
 }
 
 export function entityArt(D, by, id) {
@@ -103,7 +116,9 @@ const observer = typeof IntersectionObserver === 'function'
 
 async function load(el) {
   if (!artworkEnabled() || !el.artSpec) return;
-  const art = await fetchArt(el.artSpec);
+  await serverAllowsArt();
+  if (!artworkEnabled()) return;
+  const art = el.artSpec.direct ?? (await fetchArt(el.artSpec));
   if (!art || !el.isConnected) return;
   const img = new Image();
   img.alt = '';

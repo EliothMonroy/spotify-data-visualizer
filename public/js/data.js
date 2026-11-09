@@ -14,7 +14,7 @@ export async function loadDataset() {
   return prepare(await res.json());
 }
 
-function prepare(raw) {
+export function prepare(raw) {
   const p = raw.plays;
   const n = p.ts.length;
   const itemCount = raw.items.name.length;
@@ -32,10 +32,12 @@ function prepare(raw) {
   const itemKind = Uint8Array.from(raw.items.kind);
 
   // Albums are grouped by album name + artist, so "Greatest Hits" by two artists stay separate.
-  const albumGroups = [];
+  // Version 2 files arrive grouped already.
+  const v2 = raw.version >= 2;
+  const albumGroups = v2 ? raw.albums : [];
   const albumIndex = new Map();
-  const itemAlbum = new Int32Array(itemCount);
-  for (let it = 0; it < itemCount; it++) {
+  const itemAlbum = v2 ? Int32Array.from(raw.items.album) : new Int32Array(itemCount);
+  for (let it = 0; !v2 && it < itemCount; it++) {
     const key = `${raw.items.album[it]}|${itemCreator[it]}`;
     let a = albumIndex.get(key);
     if (a === undefined) {
@@ -58,10 +60,8 @@ function prepare(raw) {
   const kind = new Uint8Array(n);
   const skip = new Uint8Array(n);
 
-  const creatorFirst = new Int32Array(raw.creators.length).fill(-1);
   const itemFirst = new Int32Array(itemCount).fill(-1);
   const itemTotal = new Uint32Array(itemCount);
-  const creatorTotal = new Uint32Array(raw.creators.length);
   const albumTotal = new Uint32Array(albumGroups.length);
 
   for (let i = 0; i < n; i++) {
@@ -80,24 +80,14 @@ function prepare(raw) {
       creator[i] = c;
       kind[i] = itemKind[it];
       if (itemFirst[it] < 0) itemFirst[it] = i;
-      if (creatorFirst[c] < 0) creatorFirst[c] = i;
       if (ms[i] >= 30000) {
         itemTotal[it]++;
-        creatorTotal[c]++;
         albumTotal[itemAlbum[it]]++;
       }
     } else {
       creator[i] = -1;
       kind[i] = 255;
     }
-  }
-
-  // Each artist's most played track, used to identify the right artist when looking up photos
-  const creatorTopItem = new Int32Array(raw.creators.length).fill(-1);
-  for (let it = 0; it < itemCount; it++) {
-    const c = itemCreator[it];
-    const best = creatorTopItem[c];
-    if (best < 0 || itemTotal[it] > itemTotal[best]) creatorTopItem[c] = it;
   }
 
   let minDay = Infinity;
@@ -107,7 +97,7 @@ function prepare(raw) {
     if (day[i] > maxDay) maxDay = day[i];
   }
 
-  return {
+  const D = {
     n, raw, ms, item, family, device, country, rs, re, flags,
     start, day, year, month, hour, weekday, creator, kind, skip,
     minDay, maxDay,
@@ -127,9 +117,72 @@ function prepare(raw) {
     countries: raw.countries,
     reasonsStart: raw.reasonsStart,
     reasonsEnd: raw.reasonsEnd,
-    creatorFirst, itemFirst, itemTotal, creatorTotal, albumTotal, creatorTopItem,
+    itemFirst, itemTotal, albumTotal,
+    extra: raw.items.extra ?? Array.from({ length: itemCount }, () => []),
+    creatorImages: raw.creatorImages ?? [],
+    albumImages: raw.albumImages ?? [],
+    creditsInfo: raw.credits ?? null,
     stats: raw.stats,
   };
+  applyCreditMode(D, 'all');
+  return D;
+}
+
+/**
+ * Which artists get credit for each track's plays: 'all' (Spotify's artist plus every artist found
+ * on Deezer) or 'first' (Spotify's artist only, the numbers before Deezer credits existed).
+ * Rebuilds the credit lists and every per-artist total that depends on them.
+ */
+export function applyCreditMode(D, mode) {
+  const count = D.items.count;
+  const credStart = new Int32Array(count + 1);
+  const ids = [];
+  for (let it = 0; it < count; it++) {
+    credStart[it] = ids.length;
+    const own = D.items.creator[it];
+    ids.push(own);
+    if (mode === 'all') for (const c of D.extra[it]) if (c !== own) ids.push(c);
+  }
+  credStart[count] = ids.length;
+  D.creditMode = mode;
+  D.credStart = credStart;
+  D.credIds = Int32Array.from(ids);
+
+  const creators = D.creators.length;
+  const creatorFirst = new Int32Array(creators).fill(-1);
+  const creatorTotal = new Uint32Array(creators);
+  for (let i = 0; i < D.n; i++) {
+    const it = D.item[i];
+    if (it < 0) continue;
+    for (let k = credStart[it]; k < credStart[it + 1]; k++) {
+      const c = D.credIds[k];
+      if (creatorFirst[c] < 0) creatorFirst[c] = i;
+      if (D.ms[i] >= 30000) creatorTotal[c]++;
+    }
+  }
+  // Each artist's most played track, used to identify the right artist when looking up photos
+  const creatorTopItem = new Int32Array(creators).fill(-1);
+  for (let it = 0; it < count; it++) {
+    for (let k = credStart[it]; k < credStart[it + 1]; k++) {
+      const c = D.credIds[k];
+      const best = creatorTopItem[c];
+      if (best < 0 || D.itemTotal[it] > D.itemTotal[best]) creatorTopItem[c] = it;
+    }
+  }
+  D.creatorFirst = creatorFirst;
+  D.creatorTotal = creatorTotal;
+  D.creatorTopItem = creatorTopItem;
+}
+
+/** Artists credited with a track's plays under the current credit mode (Spotify's artist first). */
+export const artistsOf = (D, it) => D.credIds.subarray(D.credStart[it], D.credStart[it + 1]);
+
+/** Every artist on a track, for display ("Treasure Bay — Kevu, ANG"), whatever the credit mode. */
+export function artistNames(D, it) {
+  const own = D.items.creator[it];
+  const names = [D.creators[own]];
+  for (const c of D.extra[it]) if (c !== own) names.push(D.creators[c]);
+  return names.join(', ');
 }
 
 function creatorKinds(count, itemCreator, itemKind) {

@@ -1,12 +1,12 @@
 // Each view returns { html, cards, after? }. Cards are mounted by app.js.
 import {
-  timeline, entityLabel, entityKeyFn, longestStreaks, mostPlaysInADay, playCountDistribution,
+  timeline, entityLabel, playsOf, longestStreaks, mostPlaysInADay, playCountDistribution,
   loyalArtists, weekHourMatrix, msByDay, msByMonthOfYear, discoveries, entityTimelines, timelinesBy,
   splitByYear, countBy, countRows, flagShares, groupStats, bucketLabel,
 } from './aggregate.js';
 import { lineChart, columnChart, rankChart, stackedColumns, weekHourHeatmap, calendarChart, renderTable, hoursFmt } from './charts.js';
 import { int, pct, duration, hours, date, dateTime, clock, esc, reasonLabel, countryName, WEEKDAYS, MONTHS } from './format.js';
-import { dayToISO } from './data.js';
+import { dayToISO, artistNames, artistsOf } from './data.js';
 import { artHTML, artNode, entityArt, artistArt } from './art.js';
 
 // ---- shared helpers ----
@@ -136,7 +136,7 @@ function overview({ D, sel, go }) {
     return {
       year: y, ms, plays,
       artist: a ? D.creators[a.id] : '—', artistId: a?.id,
-      track: t ? D.items.name[t.id] : '—', trackSub: t ? `${D.creators[D.items.creator[t.id]]} · ${int(t.plays)} plays` : '',
+      track: t ? D.items.name[t.id] : '—', trackSub: t ? `${artistNames(D, t.id)} · ${int(t.plays)} plays` : '',
     };
   });
 
@@ -275,7 +275,7 @@ function repeat({ D, sel, go }) {
     <div class="tiles span-2">
       ${tile(`${W.tracks[0].toUpperCase()}${W.tracks.slice(1)} played once`, int(once), `${pct(once / Math.max(1, tracks.length))} of ${int(tracks.length)} ${W.tracks}`)}
       ${tile('Played 10+ times', int(tenPlus), `${int(hundredPlus)} played 100+ times`)}
-      ${tile(`Most played ${W.track.toLowerCase()}`, topTrack ? `${int(topTrack.plays)} plays` : '—', topTrack ? `${D.items.name[topTrack.id]} · ${D.creators[D.items.creator[topTrack.id]]}` : '')}
+      ${tile(`Most played ${W.track.toLowerCase()}`, topTrack ? `${int(topTrack.plays)} plays` : '—', topTrack ? `${D.items.name[topTrack.id]} · ${artistNames(D, topTrack.id)}` : '')}
       ${tile(`Top 10% of ${W.tracks}`, pct(topShare), 'Share of all your plays')}
       ${tile('Longest back-to-back run', streaks[0] ? `${streaks[0].len}× in a row` : '—', streaks[0] ? D.items.name[streaks[0].id] : '')}
     </div>
@@ -443,7 +443,9 @@ function discovery({ D, sel, go }) {
     if (f >= 0 && D.day[f] >= sel.fromDay && D.day[f] <= sel.toDay) isNew[c] = 1;
   }
   let newMs = 0;
-  for (const i of sel.idx) if (D.creator[i] >= 0 && isNew[D.creator[i]]) newMs += D.ms[i];
+  for (const i of sel.idx) {
+    if (D.item[i] >= 0 && artistsOf(D, D.item[i]).some((c) => isNew[c])) newMs += D.ms[i];
+  }
   const artists = sel.group('artist');
   const finds = artists.filter((a) => isNew[a.id] && a.plays > 0).slice(0, 10).map((a) => ({ id: a.id, value: a.plays, first: D.day[D.creatorFirst[a.id]] }));
 
@@ -626,7 +628,7 @@ function buildSearchIndex(D) {
   const out = [];
   D.creators.forEach((name, id) => out.push({ by: 'artist', id, name, sub: D.creatorKind[id] === 0 ? 'Artist' : 'Show', total: D.creatorTotal[id] }));
   for (let id = 0; id < D.items.count; id++) {
-    out.push({ by: 'track', id, name: D.items.name[id], sub: `${D.items.kind[id] === 0 ? 'Track' : 'Episode'} · ${D.creators[D.items.creator[id]]}`, total: D.itemTotal[id] });
+    out.push({ by: 'track', id, name: D.items.name[id], sub: `${D.items.kind[id] === 0 ? 'Track' : 'Episode'} · ${artistNames(D, id)}`, total: D.itemTotal[id] });
   }
   D.albums.forEach((a, id) => {
     if (D.creatorKind[a.creator] === 0) out.push({ by: 'album', id, name: a.name, sub: `Album · ${D.creators[a.creator]}`, total: D.albumTotal[id] });
@@ -701,14 +703,13 @@ function explore({ D, sel, params, go }) {
         <section class="card span-2"><header class="card-head"><div><h3>Start with your top ${W.artists}</h3><p>Or search above for anything you've played</p></div></header>
           <div class="chips">${artists.map((a) => chip('artist', a.id, D.creators[a.id])).join('')}</div></section>
         <section class="card span-2"><header class="card-head"><div><h3>…or your top ${W.tracks}</h3></div></header>
-          <div class="chips">${tracks.map((t) => chip('track', t.id, `${D.items.name[t.id]} · ${D.creators[D.items.creator[t.id]]}`)).join('')}</div></section>`,
+          <div class="chips">${tracks.map((t) => chip('track', t.id, `${D.items.name[t.id]} · ${artistNames(D, t.id)}`)).join('')}</div></section>`,
       cards: [],
       after,
     };
   }
 
-  const key = entityKeyFn(D, by);
-  const sub = sel.idx.filter((i) => key(i) === id);
+  const sub = playsOf(D, sel.idx, by, id);
   const label = entityLabel(D, by, id);
   const creatorId = by === 'artist' ? id : by === 'track' ? D.items.creator[id] : D.albums[id].creator;
   const isPodcast = D.creatorKind[creatorId] !== 0;
@@ -716,7 +717,8 @@ function explore({ D, sel, params, go }) {
 
   let meta = '';
   if (by !== 'artist') {
-    meta = `by <button type="button" data-href="${exploreHash('artist', creatorId)}">${esc(D.creators[creatorId])}</button>`;
+    const credited = by === 'track' ? [D.items.creator[id], ...D.extra[id].filter((c) => c !== D.items.creator[id])] : [creatorId];
+    meta = `by ${credited.map((c) => `<button type="button" data-href="${exploreHash('artist', c)}">${esc(D.creators[c])}</button>`).join(', ')}`;
     if (by === 'track' && !isPodcast) {
       const albumId = D.items.album[id];
       meta += ` · <button type="button" data-href="${exploreHash('album', albumId)}">${esc(D.albums[albumId].name)}</button>`;
