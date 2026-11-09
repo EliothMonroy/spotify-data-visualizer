@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS tracks (    -- tracks, podcast episodes and audiobook
   spotify_id TEXT,
   deezer_status TEXT,                  -- NULL (not checked), 'matched' or 'not_found'
   deezer_id INTEGER,
-  deezer_checked_at INTEGER
+  deezer_checked_at INTEGER,
+  mb_status TEXT,                      -- MusicBrainz fallback: NULL, 'matched', 'solo' or 'not_found'
+  mb_id TEXT,
+  mb_checked_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS credits (   -- every artist on a track; Spotify's artist is position 0
   track_id INTEGER NOT NULL REFERENCES tracks(id),
@@ -91,7 +94,20 @@ export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 60000; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// Columns added after the first release, for databases created before them.
+const ADDED_COLUMNS = { tracks: { mb_status: 'TEXT', mb_id: 'TEXT', mb_checked_at: 'INTEGER' } };
+
+function migrate(db) {
+  for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, type] of Object.entries(columns)) {
+      if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
 }
 
 /** Run fn inside a transaction; roll back if it throws. */

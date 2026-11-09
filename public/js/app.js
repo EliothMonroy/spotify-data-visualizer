@@ -217,7 +217,9 @@ function showCreditsStatus() {
   const c = D.creditsInfo;
   const el = $('#credits-status');
   if (!c || !c.checked) return;
-  el.textContent = `Artist credits checked on Deezer for ${int(c.checked)} of ${int(c.total)} tracks (${pct(c.playsCovered / Math.max(1, c.playsTotal))} of plays).`;
+  const found = c.found ?? c.matched;
+  const playsFound = c.playsFound ?? c.playsCovered;
+  el.textContent = `All artists known for ${int(found)} of ${int(c.total)} tracks (${pct(playsFound / Math.max(1, c.playsTotal))} of plays), from Deezer and MusicBrainz.`;
   el.hidden = false;
 }
 

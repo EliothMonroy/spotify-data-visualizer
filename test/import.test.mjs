@@ -117,3 +117,17 @@ test('a few late-synced plays inside the old history are accepted', () => {
   const late = Array.from({ length: 10 }, (_, i) => treasureBay(new Date(Date.UTC(2020, 0, 2) + i * 60e3 + 1).toISOString(), { offline: true }));
   assert.equal(importRows(db, late).added, 10);
 });
+
+test('an existing database gets the MusicBrainz columns when opened', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const file = join(mkdtempSync(join(tmpdir(), 'sdv-')), 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE tracks (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, kind INTEGER NOT NULL, name TEXT NOT NULL,
+    artist_id INTEGER NOT NULL, album_id INTEGER NOT NULL, spotify_id TEXT, deezer_status TEXT, deezer_id INTEGER, deezer_checked_at INTEGER)`);
+  old.close();
+  const cols = openDb(file).prepare('PRAGMA table_info(tracks)').all().map((c) => c.name);
+  for (const c of ['mb_status', 'mb_id', 'mb_checked_at']) assert.ok(cols.includes(c), c);
+});

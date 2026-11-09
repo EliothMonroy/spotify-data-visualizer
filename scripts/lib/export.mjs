@@ -8,6 +8,8 @@ import { dictionary, normalizePlatform, flagsOf, KIND_TRACK } from './normalize.
 import { getKv } from './db.mjs';
 
 const MIN_PLAY_MS = 30000;
+// A track's artists are known once Deezer matched it or MusicBrainz answered (including "solo").
+const FOUND = "(t.deezer_status = 'matched' OR t.mb_status IN ('matched', 'solo'))";
 
 const imageOf = (row) => (row?.image_status === 'found' && row.image_thumb
   ? [row.image_thumb, row.image_full ?? row.image_thumb, row.image_source ?? '', row.image_link ?? '']
@@ -83,9 +85,9 @@ function readDataset(db) {
     plays.flags.push(flagsOf(r));
   }
 
-  // Extra artists from Deezer (Spotify's own artist is always position 0 and already in items.creator).
+  // Extra artists from Deezer and MusicBrainz (Spotify's own artist is always position 0 and already in items.creator).
   const extraByTrack = new Map();
-  for (const c of db.prepare("SELECT track_id, artist_id FROM credits WHERE source = 'deezer' ORDER BY track_id, position").all()) {
+  for (const c of db.prepare("SELECT track_id, artist_id FROM credits WHERE source <> 'spotify' ORDER BY track_id, position").all()) {
     let list = extraByTrack.get(c.track_id);
     if (!list) extraByTrack.set(c.track_id, (list = []));
     list.push(c.artist_id);
@@ -101,6 +103,8 @@ function readDataset(db) {
       count(*) AS total,
       sum(t.deezer_status IS NOT NULL) AS checked,
       sum(t.deezer_status = 'matched') AS matched,
+      sum(${FOUND}) AS found,
+      sum(CASE WHEN ${FOUND} THEN coalesce(n, 0) ELSE 0 END) AS playsFound,
       sum(CASE WHEN t.deezer_status IS NOT NULL THEN coalesce(n, 0) ELSE 0 END) AS playsCovered,
       sum(coalesce(n, 0)) AS playsTotal
     FROM tracks t LEFT JOIN (
@@ -133,6 +137,8 @@ function readDataset(db) {
     credits: {
       checked: credits.checked ?? 0,
       matched: credits.matched ?? 0,
+      found: credits.found ?? 0,
+      playsFound: credits.playsFound ?? 0,
       total: credits.total ?? 0,
       playsCovered: credits.playsCovered ?? 0,
       playsTotal: credits.playsTotal ?? 0,

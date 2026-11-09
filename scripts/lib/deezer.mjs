@@ -12,11 +12,12 @@ export const hasDeezerImage = (url) => Boolean(url) && !/\/images\/(artist|cover
 
 /**
  * Sliding-window limiter: at most `max` task starts in any `windowMs`, and at most `concurrency`
- * tasks running at once. slowDown() halves the rate and pauses for 10 s; the rate then recovers by
- * 5 per minute without errors.
+ * tasks running at once. slowDown() halves the rate (never below `min`) and pauses for 10 s; the
+ * rate then recovers by 5 per minute without errors (never above `max`).
  */
 export function createLimiter({
   max = 40,
+  min = Math.min(10, max),
   windowMs = 5000,
   concurrency = 4,
   now = Date.now,
@@ -71,7 +72,7 @@ export function createLimiter({
       });
     },
     slowDown() {
-      current = Math.max(10, Math.floor(current / 2));
+      current = Math.max(min, Math.floor(current / 2));
       pausedUntil = now() + 10000;
       lastChange = now();
     },
