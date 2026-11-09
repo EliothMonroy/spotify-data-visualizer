@@ -7,6 +7,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, setKv } from './lib/db.mjs';
 import { importRows, migrateArtworkCache, ImportOverlapError } from './lib/import.mjs';
+import { writeDataset } from './lib/export.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -18,8 +19,17 @@ const argValue = (name) => {
 export const DB_FILE = join(root, 'data', 'spotify.db');
 const sourceDir = resolve(root, argValue('--source') ?? 'Spotify Extended Streaming History');
 
+export const DATA_FILE = join(root, 'data', 'plays.json');
+
 if (args.includes('--if-missing') && existsSync(DB_FILE)) {
-  console.log(`Using existing ${DB_FILE} (run "npm run import" after downloading a newer export).`);
+  if (!existsSync(DATA_FILE)) {
+    const db = openDb(DB_FILE);
+    await writeDataset(db, DATA_FILE);
+    db.close();
+    console.log(`Rebuilt ${DATA_FILE} from ${DB_FILE}.`);
+  } else {
+    console.log(`Using existing ${DB_FILE} (run "npm run import" after downloading a newer export).`);
+  }
   process.exit(0);
 }
 
@@ -56,6 +66,7 @@ try {
 setKv(db, 'last_import', JSON.stringify({ at: new Date().toISOString(), files: files.length, ...result }));
 
 const migrated = migrateArtworkCache(db, join(root, 'data', 'artwork-cache.json'));
+await writeDataset(db, DATA_FILE);
 const count = (sql) => db.prepare(sql).get().n.toLocaleString();
 console.log(
   `\nImported into ${DB_FILE}` +
@@ -64,6 +75,7 @@ console.log(
     `\n  ${count('SELECT count(*) n FROM plays')} plays, ${count('SELECT count(*) n FROM tracks')} tracks/episodes, ` +
     `${count('SELECT count(*) n FROM artists')} artists/shows` +
     (result.newTracks ? `\n  ${result.newTracks.toLocaleString()} new tracks (check their artists with: npm run credits)` : '') +
-    (migrated ? `\n  ${migrated.toLocaleString()} saved images moved from artwork-cache.json` : ''),
+    (migrated ? `\n  ${migrated.toLocaleString()} saved images moved from artwork-cache.json` : '') +
+    `\nWrote ${DATA_FILE}`,
 );
 db.close();

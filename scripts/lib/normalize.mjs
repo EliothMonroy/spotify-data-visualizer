@@ -54,14 +54,14 @@ export function flagsOf(row) {
 }
 
 /**
- * Drop rows that are exact copies of another row (every field identical).
- * Repeat listens of the same track happen at different times, so they are kept.
+ * Drop rows that are copies of another row (every field identical except the IP address,
+ * which is never stored). Repeat listens of the same track happen at different times, so they are kept.
  */
 export function dedupeExact(rows) {
   const seen = new Set();
   const out = [];
   for (const row of rows) {
-    const key = JSON.stringify(row, Object.keys(row).sort());
+    const key = JSON.stringify(row, Object.keys(row).filter((k) => k !== 'ip_addr').sort());
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(row);

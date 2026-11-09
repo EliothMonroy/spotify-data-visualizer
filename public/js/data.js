@@ -14,7 +14,7 @@ export async function loadDataset() {
   return prepare(await res.json());
 }
 
-function prepare(raw) {
+export function prepare(raw) {
   const p = raw.plays;
   const n = p.ts.length;
   const itemCount = raw.items.name.length;
@@ -32,10 +32,12 @@ function prepare(raw) {
   const itemKind = Uint8Array.from(raw.items.kind);
 
   // Albums are grouped by album name + artist, so "Greatest Hits" by two artists stay separate.
-  const albumGroups = [];
+  // Version 2 files arrive grouped already.
+  const v2 = raw.version >= 2;
+  const albumGroups = v2 ? raw.albums : [];
   const albumIndex = new Map();
-  const itemAlbum = new Int32Array(itemCount);
-  for (let it = 0; it < itemCount; it++) {
+  const itemAlbum = v2 ? Int32Array.from(raw.items.album) : new Int32Array(itemCount);
+  for (let it = 0; !v2 && it < itemCount; it++) {
     const key = `${raw.items.album[it]}|${itemCreator[it]}`;
     let a = albumIndex.get(key);
     if (a === undefined) {
@@ -128,6 +130,10 @@ function prepare(raw) {
     reasonsStart: raw.reasonsStart,
     reasonsEnd: raw.reasonsEnd,
     creatorFirst, itemFirst, itemTotal, creatorTotal, albumTotal, creatorTopItem,
+    extra: raw.items.extra ?? Array.from({ length: itemCount }, () => []),
+    creatorImages: raw.creatorImages ?? [],
+    albumImages: raw.albumImages ?? [],
+    creditsInfo: raw.credits ?? null,
     stats: raw.stats,
   };
 }

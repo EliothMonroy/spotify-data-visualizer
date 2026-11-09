@@ -70,3 +70,7 @@ test('dataset is column-oriented, sorted, and drops IP addresses', () => {
   assert.equal(ds.plays.flags[1], FLAG_SKIPPED | FLAG_SHUFFLE);
   assert.ok(!JSON.stringify(ds).includes('1.2.3.4'));
 });
+
+test('rows that differ only in IP address are the same play', () => {
+  assert.equal(dedupeExact([row(), row({ ip_addr: '5.6.7.8' })]).length, 1);
+});
