@@ -90,9 +90,9 @@ export function buildDatasetFromDb(db) {
       count(*) AS total,
       sum(t.deezer_status IS NOT NULL) AS checked,
       sum(t.deezer_status = 'matched') AS matched,
-      sum(CASE WHEN t.deezer_status IS NOT NULL THEN n ELSE 0 END) AS playsCovered,
-      sum(n) AS playsTotal
-    FROM tracks t JOIN (
+      sum(CASE WHEN t.deezer_status IS NOT NULL THEN coalesce(n, 0) ELSE 0 END) AS playsCovered,
+      sum(coalesce(n, 0)) AS playsTotal
+    FROM tracks t LEFT JOIN (
       SELECT m.track_id, count(*) AS n FROM plays p JOIN meta m ON m.id = p.meta_id
       WHERE p.ms_played >= ${MIN_PLAY_MS} GROUP BY m.track_id
     ) c ON c.track_id = t.id
