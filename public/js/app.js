@@ -3,6 +3,7 @@ import { groupStats, summarize, pickUnit } from './aggregate.js';
 import { mount, disposeIn, renderTable } from './charts.js';
 import { date } from './format.js';
 import { VIEWS } from './views.js';
+import { artworkEnabled, setArtworkEnabled, hydrateArt } from './art.js';
 
 const $ = (sel) => document.querySelector(sel);
 const viewEl = $('#view');
@@ -44,6 +45,19 @@ $('#theme-toggle').addEventListener('click', () => {
   applyTheme(next);
   render();
 });
+// ---- artwork toggle ----
+function syncArtButton() {
+  const on = artworkEnabled();
+  $('#art-toggle').setAttribute('aria-pressed', String(on));
+  $('#art-toggle').title = on ? 'Artwork on (looked up on Deezer, iTunes, TheAudioDB)' : 'Artwork off';
+}
+$('#art-toggle').addEventListener('click', () => {
+  setArtworkEnabled(!artworkEnabled());
+  syncArtButton();
+  render();
+});
+syncArtButton();
+
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
 
 // ---- routing: #/view/param1/param2 ----
@@ -171,6 +185,8 @@ function render() {
   viewEl.innerHTML = out.html;
   out.cards.forEach(mountCard);
   out.after?.(viewEl);
+  hydrateArt(viewEl);
+  syncArtButton();
 }
 
 async function start() {
