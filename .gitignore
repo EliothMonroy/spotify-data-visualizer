@@ -1,0 +1,16 @@
+# Personal Spotify data — never commit
+Spotify Extended Streaming History/
+Spotify*History*/
+data/
+*.json.gz
+
+# Dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Editor time tracking
+.wakatime-project

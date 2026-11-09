@@ -1,0 +1,19 @@
+{
+  "name": "spotify-data-visualizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local dashboards for your Spotify Extended Streaming History export",
+  "type": "module",
+  "scripts": {
+    "prepare-data": "node scripts/prepare-data.mjs",
+    "serve": "node server.mjs",
+    "start": "node scripts/prepare-data.mjs --if-missing && node server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "echarts": "6.1.0"
+  }
+}
