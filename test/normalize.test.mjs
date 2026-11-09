@@ -46,6 +46,7 @@ test('platform strings are grouped into families', () => {
   assert.equal(normalizePlatform('Partner windows_tv microsoft;xbox_one_s_;;').device, 'Xbox');
   assert.equal(normalizePlatform('Partner webos_tv lg;43un7300aud;;').family, 'Smart TV');
   assert.equal(normalizePlatform('ios').family, 'iOS');
+  assert.deepEqual(normalizePlatform('Partner android_sdk SONY;e2306;965a75;5.0_arm64-v8a'), { family: 'Android', device: 'Sony E2306' });
 });
 
 test('content kind detection', () => {

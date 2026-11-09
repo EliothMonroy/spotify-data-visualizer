@@ -17,6 +17,8 @@ export function normalizePlatform(raw) {
 
   const android = p.match(/^Android OS [\d.]+ API \d+ \(([^,]+),\s*([^)]+)\)/);
   if (android) return { family: 'Android', device: `${android[1]} ${android[2]}`.trim() };
+  const sdk = p.match(/android_sdk\s+([^;]+);([^;]+);/i);
+  if (sdk) return { family: 'Android', device: `${sdk[1][0]}${sdk[1].slice(1).toLowerCase()} ${sdk[2].toUpperCase()}` };
   if (lower === 'android' || lower.startsWith('android')) return { family: 'Android', device: 'Android' };
 
   if (lower.startsWith('ios') || lower.includes('iphone') || lower.includes('ipad')) {
