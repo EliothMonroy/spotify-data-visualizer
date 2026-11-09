@@ -90,8 +90,9 @@ export async function checkTrack(db, deezer, track) {
 }
 
 /**
- * Credit each contributor ({name, role, id?}) on the track, matching them to local artists or
- * creating new ones. onArtist(contributor, artistId) runs for every matched contributor.
+ * Credit each contributor ({name, role, id?, altName?}) on the track, matching them to local
+ * artists (by name, then by altName) or creating new ones under `name`.
+ * onArtist(contributor, artistId) runs for every matched contributor.
  * Returns how many artists were added besides Spotify's own.
  */
 function addCredits(db, track, contributors, source, onArtist = () => {}) {
@@ -104,7 +105,9 @@ function addCredits(db, track, contributors, source, onArtist = () => {}) {
   let position = db.prepare('SELECT coalesce(max(position), 0) + 1 AS p FROM credits WHERE track_id = ?').get(track.id).p;
   let added = 0;
   for (const c of contributors) {
-    let id = resolveContributor(c, { ...ctx, trackArtist: { id: track.artistId, name: track.artistName } });
+    const resolveCtx = { ...ctx, trackArtist: { id: track.artistId, name: track.artistName } };
+    let id = resolveContributor(c, resolveCtx);
+    if (id === null && c.altName && c.altName !== c.name) id = resolveContributor({ ...c, name: c.altName }, resolveCtx);
     if (id === null) {
       // New to this run. The name may still exist: a show, or an artist added by another process.
       q.addArtist.run(c.name);
@@ -177,7 +180,9 @@ export async function checkTrackMusicBrainz(db, mb, track) {
   let featured = false;
   const contributors = best.credit.map((c, i) => {
     if (i > 0 && FEATURING.test(best.credit[i - 1].joinphrase ?? '')) featured = true;
-    return { name: c.artist?.name ?? c.name, role: featured ? 'Featured' : 'Main' };
+    // The name printed on the release ("Tomo Hirata") reads like Spotify's; MusicBrainz's main
+    // name for the artist ("平田知昌") is kept as a backup for matching.
+    return { name: c.name ?? c.artist?.name, altName: c.artist?.name, role: featured ? 'Featured' : 'Main' };
   });
   return transaction(db, () => {
     const added = addCredits(db, track, contributors, 'musicbrainz');

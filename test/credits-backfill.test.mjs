@@ -275,3 +275,19 @@ test('a short-only track Deezer misses is not sent to MusicBrainz', async () => 
   assert.equal(mb.calls.length, 0);
   assert.equal(status(db, 'Short').mb_status, null);
 });
+
+test('MusicBrainz artists use the name printed on the release, with the main name as a backup match', async () => {
+  const db = missedOnDeezer();
+  db.prepare("INSERT INTO artists (name) VALUES ('Jonathan Mendelsohn')").run();
+  const recording = {
+    id: 'r9', title: 'Treasure Bay',
+    'artist-credit': [
+      { name: 'Kevu', joinphrase: ' & ', artist: { id: 'a1', name: 'Kevu' } },
+      { name: 'Tomo Hirata', joinphrase: ' feat. ', artist: { id: 'a2', name: '平田知昌' } },
+      { name: 'J. Mendelsohn', joinphrase: '', artist: { id: 'a3', name: 'Jonathan Mendelsohn' } },
+    ],
+  };
+  assert.equal(await checkTrackMusicBrainz(db, fakeMb([recording]), mbTrack(db)), 'matched');
+  assert.deepEqual(credits(db).map((c) => c.name), ['Kevu', 'Tomo Hirata', 'Jonathan Mendelsohn']);
+  assert.equal(db.prepare("SELECT count(*) n FROM artists WHERE name IN ('平田知昌', 'J. Mendelsohn')").get().n, 0);
+});
