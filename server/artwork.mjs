@@ -10,52 +10,9 @@ import { dirname } from 'node:path';
 const MISS_RETRY_MS = 14 * 24 * 3600 * 1000; // try again for missing art after two weeks
 const USER_AGENT = 'spotify-data-visualizer/1.0 (personal, local use)';
 
-// ---- name matching (pure, exported for tests) ----
+import { normalize, normalizeAlbum, pickArtist, pickAlbum } from '../scripts/lib/names.mjs';
 
-/** Lowercase, strip accents, punctuation and filler so "Beyoncé" ≈ "Beyonce", "The Weeknd" ≈ "Weeknd". */
-export function normalize(s) {
-  return String(s ?? '')
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/^the /, '')
-    .trim();
-}
-
-/** Album titles vary in suffixes: "Stories (Deluxe)", "Louder - Radio Edit", "X - EP". */
-export function normalizeAlbum(s) {
-  return normalize(
-    String(s ?? '')
-      .replace(/\s*[([][^)\]]*(edition|deluxe|remaster|version|expanded|anniversary|bonus|explicit|single|ep)[^)\]]*[)\]]/gi, '')
-      .replace(/\s+-\s+(single|ep|radio edit|remastered.*|deluxe.*)$/i, ''),
-  );
-}
-
-/** Exact (normalized) name match; when several artists share the name, the one with most fans. */
-export function pickArtist(results, name, nameOf = (r) => r.name) {
-  const want = normalize(name);
-  const same = (results ?? []).filter((r) => normalize(nameOf(r)) === want);
-  return same.sort((a, b) => (b.nb_fan ?? 0) - (a.nb_fan ?? 0))[0] ?? null;
-}
-
-export function pickAlbum(results, artist, album, { artistOf, titleOf }) {
-  const wantArtist = normalize(artist);
-  const wantAlbum = normalizeAlbum(album);
-  const sameArtist = (results ?? []).filter((r) => {
-    const a = normalize(artistOf(r));
-    return a === wantArtist || a.includes(wantArtist) || wantArtist.includes(a);
-  });
-  return (
-    sameArtist.find((r) => normalizeAlbum(titleOf(r)) === wantAlbum) ??
-    sameArtist.find((r) => {
-      const t = normalizeAlbum(titleOf(r));
-      return t && wantAlbum && (t.startsWith(wantAlbum) || wantAlbum.startsWith(t));
-    }) ??
-    null
-  );
-}
+export { normalize, normalizeAlbum, pickArtist, pickAlbum };
 
 // ---- polite per-host request queue ----
 
