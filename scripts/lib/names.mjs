@@ -54,21 +54,45 @@ export function pickAlbum(results, artist, album, { artistOf, titleOf }) {
   );
 }
 
+// Words that mark a different recording (a remix credits its remixer, a live version its guests).
+const VERSION_WORDS = new Set(['remix', 'rework', 'bootleg', 'vip', 'flip', 'mashup', 'edit', 'mix', 'live', 'cover', 'acoustic', 'instrumental', 'remake', 'dub']);
+// Version names that are the same recording, so they don't count.
+const SAME_RECORDING = /\b(radio edit|radio mix|extended mix|extended version|extended|original mix|club mix|single version|album version|remastered|remaster|mono|stereo|\d{4})\b/g;
+
+/** The version words in a title's brackets or " - ..." suffix, ignoring "feat." parts. */
+export function versionWords(title) {
+  const raw = String(title ?? '');
+  const parts = [...raw.matchAll(/[([]([^)\]]*)[)\]]/g)].map((m) => m[1]);
+  const dash = raw.replace(/\s*[([][^)\]]*[)\]]/g, '').match(/\s+-\s+(.*)$/);
+  if (dash) parts.push(dash[1]);
+  const words = new Set();
+  for (const part of parts) {
+    const text = normalize(part);
+    if (/^(feat|ft|featuring|with)\b/.test(text)) continue;
+    for (const w of text.replace(SAME_RECORDING, ' ').split(/\s+/)) if (VERSION_WORDS.has(w)) words.add(w);
+  }
+  return [...words].sort().join(' ');
+}
+
 /**
- * Deezer search results that could be the wanted track: exact title first, then the same title
- * without version suffixes; within each, results whose lead artist matches come first. At most two.
+ * Deezer search results that could be the wanted track. A result must have the same lead artist
+ * and the same version words (so a remix never stands in for the original). Exact titles come
+ * first, then a plain title for a Spotify title with extras, then other matching versions.
+ * At most two.
  */
 export function pickTrackCandidates(results, artist, title) {
   const wantTitle = normalize(title);
   const wantBase = baseTitle(title);
   const wantArtist = normalize(artist);
-  if (!wantTitle) return [];
+  const wantVersion = versionWords(title);
+  if (!wantTitle || !wantArtist) return [];
   const scored = [];
   for (const r of results ?? []) {
-    const tier = normalize(r.title) === wantTitle ? 0 : wantBase && baseTitle(r.title) === wantBase ? 1 : -1;
-    if (tier < 0) continue;
-    const lead = wantArtist && normalize(r.artist?.name) === wantArtist ? 0 : 1;
-    scored.push({ r, rank: tier * 2 + lead });
+    if (normalize(r.artist?.name) !== wantArtist) continue;
+    if (versionWords(r.title) !== wantVersion) continue;
+    const t = normalize(r.title);
+    const rank = t === wantTitle ? 0 : t === wantBase ? 1 : wantBase && baseTitle(r.title) === wantBase ? 2 : -1;
+    if (rank >= 0) scored.push({ r, rank });
   }
   return scored.sort((a, b) => a.rank - b.rank).slice(0, 2).map((s) => s.r);
 }

@@ -10,8 +10,25 @@ test('pickTrackCandidates prefers the exact title over a version of it', () => {
   assert.deepEqual(pickTrackCandidates([ext, orig], 'Kevu', 'Treasure Bay').map((r) => r.id), [2, 1]);
 });
 
-test('pickTrackCandidates ranks the matching lead artist before a same-title decoy', () => {
-  assert.deepEqual(pickTrackCandidates([decoy, orig], 'Kevu', 'Treasure Bay').map((r) => r.id), [2, 3]);
+test('pickTrackCandidates rejects results whose lead artist is someone else', () => {
+  assert.deepEqual(pickTrackCandidates([decoy, orig], 'Kevu', 'Treasure Bay').map((r) => r.id), [2]);
+  assert.deepEqual(pickTrackCandidates([{ id: 8, title: 'Intro', artist: { name: 'B' } }], 'A', 'Intro'), []);
+});
+
+test('pickTrackCandidates never picks a remix or other version for the original', () => {
+  const remix = { id: 1, title: 'Levitating (The Blessed Madonna Remix)', artist: { name: 'Dua Lipa' } };
+  const plain = { id: 2, title: 'Levitating', artist: { name: 'Dua Lipa' } };
+  assert.deepEqual(pickTrackCandidates([remix, plain], 'Dua Lipa', 'Levitating (feat. DaBaby)').map((r) => r.id), [2]);
+  const djRemix = { id: 3, title: 'Song (DJ X Remix)', artist: { name: 'A' } };
+  assert.deepEqual(pickTrackCandidates([djRemix], 'A', 'Song - Live'), []);
+  const tiesto = { id: 4, title: "L'Amour Toujours (Tiësto Edit)", artist: { name: 'Dzeko' } };
+  assert.deepEqual(pickTrackCandidates([{ ...tiesto, title: "L'Amour Toujours" }, tiesto], 'Dzeko', "L'Amour Toujours - Tiësto Edit").map((r) => r.id), [4]);
+});
+
+test('pickTrackCandidates allows harmless version names and prefers the plain title', () => {
+  const radio = { id: 5, title: 'Song - Radio Edit', artist: { name: 'A' } };
+  const plain = { id: 6, title: 'Song', artist: { name: 'A' } };
+  assert.deepEqual(pickTrackCandidates([radio, plain], 'A', 'Song (feat. B)').map((r) => r.id), [6, 5]);
 });
 
 test('pickTrackCandidates drops other titles and returns at most two', () => {

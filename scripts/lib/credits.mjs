@@ -2,9 +2,14 @@
 // credit every one of them, along with their pictures and (when it is the same album) the cover.
 import { transaction } from './db.mjs';
 import { normalize, pickAlbum, pickTrackCandidates, contributorsInclude, resolveContributor } from './names.mjs';
-import { hasDeezerImage } from './deezer.mjs';
+import { hasDeezerImage, TransientError } from './deezer.mjs';
 
 const MIN_PLAY_MS = 30000;
+
+/** Failures worth trying again later: Deezer trouble, or the database busy with another process. */
+export function isTransient(err) {
+  return err instanceof TransientError || err?.errcode === 5 || err?.errcode === 6 || /database is (locked|busy)/i.test(err?.message ?? '');
+}
 
 /**
  * Music tracks without a Deezer answer yet, most played first.
@@ -34,7 +39,8 @@ function contextFor(db) {
   const plays = new Map(db.prepare(`SELECT t.artist_id AS id, count(*) AS n FROM plays p JOIN meta m ON m.id = p.meta_id
     JOIN tracks t ON t.id = m.track_id GROUP BY t.artist_id`).all().map((r) => [r.id, r.n]));
   ctx = { byDeezerId: new Map(), byExactName: new Map(), byNorm: new Map() };
-  for (const a of db.prepare('SELECT id, name, deezer_id FROM artists').all()) remember(ctx, a, plays.get(a.id) ?? 0);
+  // Podcast shows and audiobooks share the artists table; they must never receive music credits.
+  for (const a of db.prepare(`SELECT id, name, deezer_id FROM artists a WHERE NOT ${NON_MUSIC}`).all()) remember(ctx, a, plays.get(a.id) ?? 0);
   contexts.set(db, ctx);
   return ctx;
 }
@@ -49,6 +55,10 @@ function remember(ctx, a, plays = 0) {
 }
 
 const clean = (s) => String(s).replace(/"/g, '');
+
+// True for creators that only have podcast episodes or audiobook chapters (`a` is the artists row).
+const NON_MUSIC = `(EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = a.id AND t.kind <> 0)
+  AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = a.id AND t.kind = 0))`;
 
 /**
  * Look a track up on Deezer and save the answer.
@@ -77,7 +87,8 @@ function saveMatch(db, track, full) {
   const ctx = contextFor(db);
   const now = Date.now();
   const q = {
-    addArtist: db.prepare('INSERT INTO artists (name) VALUES (?)'),
+    addArtist: db.prepare('INSERT OR IGNORE INTO artists (name) VALUES (?)'),
+    byName: db.prepare(`SELECT a.id, a.deezer_id, ${NON_MUSIC} AS nonMusic FROM artists a WHERE a.name = ?`),
     link: db.prepare('UPDATE artists SET deezer_id = ? WHERE id = ? AND deezer_id IS NULL'),
     linkedTo: db.prepare('SELECT deezer_id FROM artists WHERE id = ?'),
     picture: db.prepare(`UPDATE artists SET image_status = 'found', image_thumb = ?, image_full = ?, image_source = 'Deezer',
@@ -89,8 +100,12 @@ function saveMatch(db, track, full) {
   for (const c of full.contributors ?? []) {
     let id = resolveContributor(c, { ...ctx, trackArtist: { id: track.artistId, name: track.artistName } });
     if (id === null) {
-      id = Number(q.addArtist.run(c.name).lastInsertRowid);
-      remember(ctx, { id, name: c.name, deezer_id: null });
+      // New to this run. The name may still exist: a show, or an artist added by another process.
+      q.addArtist.run(c.name);
+      const row = q.byName.get(c.name);
+      if (row.nonMusic) continue;
+      id = row.id;
+      remember(ctx, { id, name: c.name, deezer_id: row.deezer_id });
     }
     if (!ctx.byDeezerId.has(c.id) && Number(q.link.run(c.id, id).changes)) ctx.byDeezerId.set(c.id, id);
     // A picture from the artist's own Deezer id is better than one found by name search.

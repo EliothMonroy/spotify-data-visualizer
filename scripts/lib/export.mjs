@@ -2,6 +2,7 @@
 // Version 2 adds: pre-grouped albums, extra (Deezer) artists per track, image links and a
 // summary of how many tracks have had their artists checked.
 import { writeFile, rename, mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { dictionary, normalizePlatform, flagsOf, KIND_TRACK } from './normalize.mjs';
 import { getKv } from './db.mjs';
@@ -13,6 +14,16 @@ const imageOf = (row) => (row?.image_status === 'found' && row.image_thumb
   : null);
 
 export function buildDatasetFromDb(db) {
+  // One read transaction, so every query sees the same moment even while a backfill is writing.
+  db.exec('BEGIN');
+  try {
+    return readDataset(db);
+  } finally {
+    db.exec('COMMIT');
+  }
+}
+
+function readDataset(db) {
   const creators = dictionary();
   const families = dictionary();
   const devices = dictionary();
@@ -133,7 +144,7 @@ export function buildDatasetFromDb(db) {
 export async function writeDataset(db, outFile) {
   const dataset = buildDatasetFromDb(db);
   await mkdir(dirname(outFile), { recursive: true });
-  const tmp = `${outFile}.tmp`;
+  const tmp = `${outFile}.${process.pid}.${randomUUID()}.tmp`; // unique, so two writers never share one
   await writeFile(tmp, JSON.stringify(dataset));
   await rename(tmp, outFile);
   return dataset;

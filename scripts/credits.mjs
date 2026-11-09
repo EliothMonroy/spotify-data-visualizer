@@ -7,8 +7,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, setKv } from './lib/db.mjs';
 import { writeDataset } from './lib/export.mjs';
-import { createLimiter, createDeezer, TransientError } from './lib/deezer.mjs';
-import { checkTrack, tracksToCheck } from './lib/credits.mjs';
+import { createLimiter, createDeezer } from './lib/deezer.mjs';
+import { checkTrack, tracksToCheck, isTransient } from './lib/credits.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DB_FILE = join(root, 'data', 'spotify.db');
@@ -76,7 +76,7 @@ async function worker() {
       if (track.status === null) covered += track.plays; // retried tracks were already counted
       errorsInARow = 0;
     } catch (err) {
-      if (!(err instanceof TransientError)) throw err;
+      if (!isTransient(err)) throw err;
       counts.errors++;
       if (++errorsInARow >= MAX_ERRORS_IN_A_ROW && !stopping) {
         stopping = true;
@@ -96,8 +96,13 @@ process.on('SIGINT', () => {
   process.stdout.write('\nStopping after the lookups in progress… (Ctrl+C again to quit right away)\n');
 });
 
-const workers = Promise.all(Array.from({ length: WORKERS }, worker));
-await (interrupted ? Promise.race([workers, new Promise((r) => setTimeout(r, 15000))]) : workers);
+let failure = null;
+try {
+  await Promise.all(Array.from({ length: WORKERS }, worker));
+} catch (err) {
+  failure = err; // unexpected: still save progress below, then report it
+  stopping = true;
+}
 
 clearInterval(progressTimer);
 clearInterval(heartbeatTimer);
@@ -113,4 +118,8 @@ console.log(
     `\nUpdated ${DATA_FILE} (reload the dashboard to see the new artist counts).`,
 );
 db.close();
+if (failure) {
+  console.error('\nThe run stopped because of an unexpected error (progress so far is saved):', failure);
+  process.exit(1);
+}
 process.exit(0);

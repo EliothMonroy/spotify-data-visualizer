@@ -19,6 +19,9 @@ export function playHash(row) {
 
 export class ImportOverlapError extends Error {}
 
+// More "new" plays than this (and more than 1% of that month) inside the stored history stops an import.
+const OVERLAP_MIN = 25;
+
 const bool = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
 
 /** The track (or episode / chapter) a row refers to, derived exactly like the old dataset builder. */
@@ -53,6 +56,8 @@ export function itemOf(r) {
 export function importRows(db, rawRows, { force = false } = {}) {
   const rows = rawRows.filter((r) => r.ts).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   const before = db.prepare('SELECT count(*) AS n, max(ts) AS maxTs FROM plays').get();
+  // Plays already stored per month ("2021-03"), for the safety check below.
+  const storedByMonth = new Map(db.prepare('SELECT substr(ts, 1, 7) AS m, count(*) AS n FROM plays GROUP BY m').all().map((r) => [r.m, r.n]));
 
   const q = {
     artistId: db.prepare('SELECT id FROM artists WHERE name = ?'),
@@ -117,7 +122,7 @@ export function importRows(db, rawRows, { force = false } = {}) {
   };
 
   let added = 0;
-  let overlap = 0;
+  const overlapByMonth = new Map();
   transaction(db, () => {
     for (const r of rows) {
       const item = itemOf(r);
@@ -129,12 +134,20 @@ export function importRows(db, rawRows, { force = false } = {}) {
       );
       if (res.changes) {
         added++;
-        if (before.n && r.ts <= before.maxTs) overlap++;
+        if (before.n && r.ts <= before.maxTs) {
+          const m = r.ts.slice(0, 7);
+          overlapByMonth.set(m, (overlapByMonth.get(m) ?? 0) + 1);
+        }
       }
     }
-    if (!force && before.n && overlap > 100 && overlap > before.n * 0.01) {
+    // A few late-synced plays inside the old history are normal. Many in one month mean the export
+    // format changed and old plays no longer look like the stored ones.
+    const suspicious = [...overlapByMonth].filter(([m, n]) => n > Math.max(OVERLAP_MIN, (storedByMonth.get(m) ?? 0) * 0.01));
+    if (!force && suspicious.length) {
+      const total = suspicious.reduce((sum, [, n]) => sum + n, 0);
       throw new ImportOverlapError(
-        `${overlap.toLocaleString()} "new" plays fall inside the history already imported. ` +
+        `${total.toLocaleString()} "new" plays fall inside the history already imported ` +
+          `(${suspicious.map(([m, n]) => `${m}: ${n.toLocaleString()}`).slice(0, 5).join(', ')}${suspicious.length > 5 ? ', …' : ''}). ` +
           'The export format probably changed, which would count old plays twice. Nothing was imported. ' +
           'If these really are new plays, run again with --force.',
       );

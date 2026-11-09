@@ -57,3 +57,12 @@ test('writeDataset replaces the file in one step and leaves no temp file', async
   assert.equal(JSON.parse(readFileSync(out, 'utf8')).version, 2);
   assert.deepEqual(readdirSync(dir), ['plays.json']);
 });
+
+test('two writers at the same time each finish and leave a valid file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sdv-'));
+  const out = join(dir, 'plays.json');
+  const results = await Promise.allSettled([writeDataset(seeded(), out), writeDataset(seeded(), out)]);
+  assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'fulfilled']);
+  assert.equal(JSON.parse(readFileSync(out, 'utf8')).version, 2);
+  assert.deepEqual(readdirSync(dir), ['plays.json']);
+});

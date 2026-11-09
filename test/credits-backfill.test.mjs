@@ -128,3 +128,50 @@ test('a temporary Deezer failure saves nothing, so the track is tried again', as
   assert.equal(db.prepare("SELECT deezer_status FROM tracks WHERE name = 'Treasure Bay'").get().deezer_status, null);
   assert.equal(tracksToCheck(db).length, 2);
 });
+
+test('a contributor never merges into a podcast show with the same name', async () => {
+  const { episodeRow } = await import('./helpers.mjs');
+  const db = seeded();
+  importRows(db, [{ ...episodeRow('2021-02-01T10:00:00Z'), episode_show_name: 'Nova', spotify_episode_uri: 'spotify:episode:nova1' }]);
+  const deezer = fakeDeezer({
+    search: [{ id: 5, title: 'Treasure Bay', artist: { name: 'KEVU' } }],
+    tracks: { 5: deezerTrack(5, [contributor(1, 'KEVU'), contributor(2, 'Nova')]) },
+  });
+  assert.equal(await checkTrack(db, deezer, kevuTrack(db)), 'matched');
+  assert.deepEqual(credits(db).map((c) => c.name), ['Kevu'], 'the show gets no music credit');
+  assert.equal(db.prepare("SELECT image_status FROM artists WHERE name = 'Nova'").get().image_status, null);
+});
+
+test('an artist added after the lookup tables were built is reused, not inserted twice', async () => {
+  const db = seeded();
+  const search = [{ id: 5, title: 'Treasure Bay', artist: { name: 'KEVU' } }];
+  await checkTrack(db, fakeDeezer({ search, tracks: { 5: deezerTrack(5, [contributor(1, 'KEVU')]) } }), kevuTrack(db));
+  db.prepare("INSERT INTO artists (name) VALUES ('Late Artist')").run();
+  const solo = tracksToCheck(db).find((t) => t.name === 'Solo');
+  const deezer = fakeDeezer({
+    search: [{ id: 6, title: 'Solo', artist: { name: 'ANG' } }],
+    tracks: { 6: { ...deezerTrack(6, [contributor(4985806, 'ANG'), contributor(3, 'Late Artist')], 'Solo'), title: 'Solo' } },
+  });
+  assert.equal(await checkTrack(db, deezer, solo), 'matched');
+  assert.equal(db.prepare("SELECT count(*) n FROM artists WHERE name = 'Late Artist'").get().n, 1);
+});
+
+test('a busy database counts as a temporary failure, other bugs do not', async () => {
+  const { isTransient } = await import('../scripts/lib/credits.mjs');
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const file = join(mkdtempSync(join(tmpdir(), 'sdv-')), 'busy.db');
+  const a = openDb(file);
+  const b = new DatabaseSync(file);
+  b.exec('PRAGMA busy_timeout = 0');
+  a.exec('BEGIN IMMEDIATE');
+  let busy;
+  try { b.exec("INSERT INTO kv (key, value) VALUES ('x', '1')"); } catch (err) { busy = err; }
+  a.exec('ROLLBACK');
+  assert.ok(busy, 'the second connection was blocked');
+  assert.equal(isTransient(busy), true);
+  assert.equal(isTransient(new TransientError('quota')), true);
+  assert.equal(isTransient(new TypeError('bug')), false);
+});

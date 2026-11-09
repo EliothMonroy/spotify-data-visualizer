@@ -98,3 +98,22 @@ test('the old artwork cache moves into the database and the file is renamed', as
   assert.deepEqual({ ...db.prepare('SELECT image_status, image_checked_at FROM albums').get() }, { image_status: 'none', image_checked_at: 7 });
   assert.ok(!existsSync(file) && existsSync(join(dir, 'artwork-cache.migrated.json')));
 });
+
+test('a format change limited to one month is still caught', () => {
+  const db = openDb(':memory:');
+  const rows = [];
+  for (let m = 0; m < 10; m++) {
+    for (let d = 0; d < 200; d++) rows.push(treasureBay(new Date(Date.UTC(2020, m, 1 + (d % 28), d % 24, d % 60)).toISOString().replace('.000', ''), { ms_played: 1000 + d }));
+  }
+  importRows(db, rows);
+  const changed = rows.slice(400, 460).map((r) => ({ ...r, platform: 'new platform format' }));
+  assert.throws(() => importRows(db, changed), ImportOverlapError);
+});
+
+test('a few late-synced plays inside the old history are accepted', () => {
+  const db = openDb(':memory:');
+  const rows = Array.from({ length: 300 }, (_, i) => treasureBay(new Date(Date.UTC(2020, 0, 1) + i * 3600e3).toISOString()));
+  importRows(db, rows);
+  const late = Array.from({ length: 10 }, (_, i) => treasureBay(new Date(Date.UTC(2020, 0, 2) + i * 60e3 + 1).toISOString(), { offline: true }));
+  assert.equal(importRows(db, late).added, 10);
+});
