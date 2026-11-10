@@ -4,6 +4,9 @@ Local dashboards for your **Spotify Extended Streaming History** export.
 Your listening data never leaves your machine, and nothing talks to Spotify.
 The only outside requests are optional artwork lookups (see [Artwork](#artwork)).
 
+> **Status:** this app stays export-only. Live tracking of new plays is being built in
+> [statstify](https://github.com/EliothMonroy/statstify), which starts from this code.
+
 ## Quick start
 
 1. Put your export folder in the project root, named `Spotify Extended Streaming History/`
@@ -70,6 +73,9 @@ npm run credits -- --retry-missing     # try again the tracks neither service ha
 
 The **Collaborations** filter switches between *All credited artists* (the default) and
 *First artist only*, which gives the numbers as Spotify's export has them.
+
+The full process, the decisions behind it and the results of the real runs are in
+[the design doc](docs/superpowers/specs/2026-11-09-sqlite-credits-design.md).
 
 ## Dashboards
 
