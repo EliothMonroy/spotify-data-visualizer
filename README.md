@@ -4,8 +4,8 @@ Local dashboards for your **Spotify Extended Streaming History** export.
 Your listening data never leaves your machine, and nothing talks to Spotify.
 The only outside requests are optional artwork lookups (see [Artwork](#artwork)).
 
-> **Status:** this app stays export-only. Live tracking of new plays is being built in
-> [statstify](https://github.com/EliothMonroy/statstify), which starts from this code.
+> **Status:** this app stays export-only. It reads Spotify's data export and doesn't track new
+> plays as they happen.
 
 ## Quick start
 
