@@ -71,6 +71,9 @@ npm run credits -- --retry-missing     # try again the tracks neither service ha
 The **Collaborations** filter switches between *All credited artists* (the default) and
 *First artist only*, which gives the numbers as Spotify's export has them.
 
+The full process, the decisions behind it and the results of the real runs are in
+[the design doc](docs/superpowers/specs/2026-11-09-sqlite-credits-design.md).
+
 ## Dashboards
 
 All dashboards share one filter row: **period** (all time, last 12 months, a year, or a

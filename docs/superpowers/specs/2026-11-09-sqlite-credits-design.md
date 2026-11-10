@@ -1,6 +1,7 @@
 # Local database and full artist credits — design
 
-Date: 2026-11-09 · Status: draft for approval
+Date: 2026-11-09 · Status: built (PR #2), extended with a MusicBrainz fallback (PR #3, section 6).
+Results of the real runs are in [Results](#results).
 
 ## Why
 
@@ -44,7 +45,7 @@ The owner wants:
   the Spotify one.
 - **Prefer precision over recall.** Credits are added only on a confident match. When unsure, the track
   keeps its single Spotify artist.
-- **Every credit records its source** (`spotify` or `deezer`). The app gets a switch to count only
+- **Every credit records its source** (`spotify`, `deezer`, or `musicbrainz` since section 6). The app gets a switch to count only
   the Spotify artist, which must reproduce today's numbers exactly.
 - **Artist identity stays as it is today:** one artist per exact Spotify name string, so "Beyoncé"
   and "Beyonce" remain separate if Spotify spells them both ways (needed for exact parity).
@@ -203,6 +204,100 @@ The owner wants:
   numbers are.
 - **README:** document the database, `npm run import`, `npm run credits` (with `caffeinate`), the
   full-credit counting rule, and the Collaborations switch.
+
+### 6. MusicBrainz fallback (added after the full Deezer run)
+
+The full Deezer run left **6,227 tracks unmatched (17.7% of music plays)**. Those tracks still
+counted for their Spotify artist only. [MusicBrainz](https://musicbrainz.org) became the second
+source because it is free, needs no account or key, and is not a Spotify service. Each recording
+there lists every credited artist, joined by phrases such as " & " or " feat. ".
+
+**Decisions made with the owner:**
+
+- **Only tracks played for 30 seconds or more** (the play rule the dashboards already use). Of the
+  6,227 tracks, 4,356 qualify; the other 1,871 were only ever skipped quickly and aren't looked up.
+- **No guessing from Spotify titles.** A track neither service has keeps its Spotify artist only.
+  Artists named in a Spotify title ("Song (feat. X)") are not parsed into credits.
+
+**Per track** (`checkTrackMusicBrainz` in `scripts/lib/credits.mjs`):
+
+1. Search recordings with `recording:"T" AND artist:"A"` (`fmt=json&limit=10`). The title is
+   searched without "(…)", "[…]" or a trailing " - Radio Edit" (`queryTitle`), because MusicBrainz
+   stores those parts differently from Spotify.
+2. Pick a result with the **same strict rules as Deezer** (`pickTrackCandidates`): same lead artist,
+   same title, same version words (a remix never stands in for the original). The lead artist is
+   compared by both its credited name and its MusicBrainz main name.
+3. Credit every artist in the recording's artist credit. Artists after a "feat." join phrase are
+   *Featured*, the rest *Main*. Contributors are attached to existing artists with the same rules
+   as Deezer contributors (section "Calls I made"), using the name printed on the release first and
+   MusicBrainz's main name as a backup. Example: the release says "Tomo Hirata", which matches
+   Spotify, while MusicBrainz's main name is "平田知昌".
+4. Save the answer in `tracks.mb_status`:
+   - `matched`: new artists were added;
+   - `solo`: MusicBrainz lists only Spotify's artist, so the track is **confirmed solo**;
+   - `not_found`: no confident match.
+
+   `mb_id` stores the MusicBrainz recording id. Rerunning skips tracks that already have an answer.
+   `--retry-missing` tries again the tracks neither service found.
+
+**Rate limit:** MusicBrainz asks for about one request per second and a descriptive User-Agent.
+
+- One request at a time, at most one every **1.1 seconds**. Short bursts got "busy" (503) answers
+  even when the average was under one per second.
+- A "busy" answer (503 or 429) or a server error waits 2 seconds (or as long as `Retry-After` asks) and tries again, up to 5
+  times. Timeouts (20 s) are retried the same way. These answers come now and then even at the
+  allowed pace, so the run does not slow down because of them.
+- About 1.4 s per track, so the 4,356 tracks take about 1 h 40 min. Deezer and MusicBrainz have
+  separate limiters, so the Deezer part of a run is not slowed down.
+
+**Problems found while building it:**
+
+- The dashboard file read only Deezer credits; it now reads every credit whose source isn't
+  `spotify`.
+- Artists whose MusicBrainz main name is in another script (for example Japanese) were created as
+  new artists instead of matching the Spotify artist. The fix is the credited-name-first rule in step 3. The 42 tracks matched
+  before the fix were checked again.
+
+## Results
+
+### Deezer run (all 38,190 music tracks)
+
+| | Tracks |
+|---|---|
+| Matched | 31,963 |
+| Not found | 6,227 (17.7% of music plays) |
+
+- **28,948 credits added:** 17,012 *Main* and 11,936 *Featured*.
+- **Artists with plays went from 3,517 to 7,915.** Many artists were only ever heard as the second
+  name on a collaboration.
+- **Re-check after tightening the matching rules:** the first rules let a remix or a track with a
+  different lead artist count as a match. After the fix, the 77 tracks checked under the old rules
+  were checked again; 60 were found under the strict rules.
+- **Spot checks looked right**, for example *Treasure Bay* → Kevu + ANG, the case that started this
+  work.
+
+Top 10 artists, before and after:
+
+| Artist | Spotify's export | With all credits | Added | Rank before |
+|---|---|---|---|---|
+| ANG | 5,316 | 7,571 | +2,255 | 1 |
+| Hardwell | 2,506 | 3,182 | +676 | 3 |
+| KSHMR | 2,187 | 3,038 | +851 | 7 |
+| Avicii | 2,774 | 3,004 | +230 | 2 |
+| Yellow Claw | 2,133 | 2,981 | +848 | 8 |
+| Bassjackers | 2,332 | 2,797 | +465 | 4 |
+| Dimitri Vegas & Like Mike | 2,264 | 2,775 | +511 | 5 |
+| Blasterjaxx | 2,108 | 2,674 | +566 | 9 |
+| Tiësto | 2,193 | 2,628 | +435 | 6 |
+| AFROJACK | 1,406 | 2,209 | +803 | 20 |
+
+Skrillex gained the most outside the top 10 (+1,156, from #29 to #11), followed by Diplo (+1,007).
+
+### MusicBrainz run (the 4,356 tracks Deezer missed)
+
+In progress. Numbers will be added when the run finishes. Early spot checks look right, for example
+*Wizard* → Martin Garrix + Jay Hardway and *Bounce Generation* → TJR + VINAI, both missing on
+Deezer.
 
 ## Non-goals
 
