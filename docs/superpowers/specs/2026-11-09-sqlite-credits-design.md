@@ -295,9 +295,23 @@ Skrillex gained the most outside the top 10 (+1,156, from #29 to #11), followed 
 
 ### MusicBrainz run (the 4,356 tracks Deezer missed)
 
-In progress. Numbers will be added when the run finishes. Early spot checks look right, for example
-*Wizard* → Martin Garrix + Jay Hardway and *Bounce Generation* → TJR + VINAI, both missing on
-Deezer.
+| | Tracks | Plays (30 s or more) |
+|---|---|---|
+| Matched, artists added | 1,514 | |
+| Confirmed solo | 1,324 | 12,183 (5.5%) |
+| Not found | 1,518 | |
+| Skipped (never played for 30 s) | 1,871 | 0 |
+
+- **2,034 credits added:** 1,246 *Main* and 788 *Featured*.
+- **Coverage:** all artists are now known for tracks with **94.8% of music plays** (Deezer matched
+  plus MusicBrainz matched or solo), up from 82.3% after Deezer alone. The 3,389 tracks still
+  missing hold 11,456 plays (5.2%).
+- **Biggest gains:** MOTi +418 plays (20 tracks), VINAI +368, KSHMR +243, Delaney Jane +215.
+- **Spot checks look right**, for example *Wizard* → Martin Garrix + Jay Hardway and *Bounce
+  Generation* → TJR + VINAI, both missing on Deezer.
+- **The most played tracks still missing** are mostly mashups and radio cuts neither service lists,
+  such as Mem – *Rock That Body* (204 plays) and Benny Benassi – *Satisfaction Alarm - Hardwell
+  Mashup Mix Cut* (163).
 
 ## Non-goals
 
