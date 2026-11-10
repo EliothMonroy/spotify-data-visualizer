@@ -297,9 +297,9 @@ Skrillex gained the most outside the top 10 (+1,156, from #29 to #11), followed 
 
 | | Tracks | Plays (30 s or more) |
 |---|---|---|
-| Matched, artists added | 1,514 | |
+| Matched, artists added | 1,514 | 15,573 (7.0%) |
 | Confirmed solo | 1,324 | 12,183 (5.5%) |
-| Not found | 1,518 | |
+| Not found | 1,518 | 11,456 (5.2%) |
 | Skipped (never played for 30 s) | 1,871 | 0 |
 
 - **2,034 credits added:** 1,246 *Main* and 788 *Featured*.
