@@ -4,6 +4,9 @@ Local dashboards for your **Spotify Extended Streaming History** export.
 Your listening data never leaves your machine, and nothing talks to Spotify.
 The only outside requests are optional artwork lookups (see [Artwork](#artwork)).
 
+> **Status:** this app stays export-only. Live tracking of new plays is being built in
+> [statstify](https://github.com/EliothMonroy/statstify), which starts from this code.
+
 ## Quick start
 
 1. Put your export folder in the project root, named `Spotify Extended Streaming History/`
